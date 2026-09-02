@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f6f3e8" />
+  <meta name="description" content="Aura III — S&P 500 screener with entry-price and position-sizing analysis, plus portfolio import and rebalancing handles." />
+  <title>Aura III · Screener & Portfolio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <a href="#main" class="sr-only">Skip to main content</a>
+
+  <!-- MARKET TAPE -->
+  <div class="tape">
+    <div class="tape__track" id="tape-track" aria-hidden="true"></div>
+  </div>
+
+  <!-- MASTHEAD -->
+  <header class="masthead">
+    <div class="masthead__inner">
+      <a href="#main" class="wordmark">
+        <!-- Bauhaus cut-paper mark: disc, blade, square, quarter-circle -->
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <rect x="17" y="17" width="19" height="19" rx="1" fill="#bcd4bd" />
+          <circle cx="16.5" cy="17.5" r="14.5" fill="#2f7d4f" />
+          <path d="M 8.5 6.5 L 14.5 4 L 23 31.5 L 17 34 Z" fill="#14352a" />
+          <path d="M 40 4 A 8 8 0 0 0 32 12 L 40 12 Z" fill="#d08b1f" />
+        </svg>
+        <span>
+          <span class="wordmark__name">Aura III</span>
+          <span class="wordmark__by">by JLMG</span>
+        </span>
+      </a>
+
+      <div class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab" id="tab-screener" role="tab" aria-selected="true" aria-controls="view-screener">Screener</button>
+        <button class="tab" id="tab-portfolio" role="tab" aria-selected="false" aria-controls="view-portfolio">Portfolio</button>
+      </div>
+
+      <div class="row" style="gap: 0.45rem">
+        <button class="btn btn--sm" id="btn-keys">
+          <span class="dot dot--off" id="key-dot"></span>
+          <span id="key-label">Keys</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell" id="main" style="padding-top: 1.25rem">
+
+    <!-- ================================================== SCREENER VIEW -->
+    <section class="view" id="view-screener" role="tabpanel" aria-labelledby="tab-screener">
+      <div class="stack-lg">
+
+        <!-- HERO -->
+        <div class="hero">
+          <svg class="hero__art" viewBox="0 0 560 250" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+            <circle cx="200" cy="120" r="106" fill="#bcd4bd" />
+            <circle cx="200" cy="120" r="106" fill="none" stroke="#14352a" stroke-width="1" opacity="0.16" />
+            <path d="M 150 -30 L 178 -36 L 246 284 L 214 292 Z" fill="#e7efe3" />
+            <path d="M 400 44 A 62 62 0 0 0 338 106 L 400 106 Z" fill="#d08b1f" />
+            <circle cx="404" cy="182" r="30" fill="#14352a" />
+            <g stroke="#14352a" stroke-width="1" opacity="0.22">
+              <line x1="470" y1="30" x2="470" y2="220" />
+              <line x1="463" y1="30" x2="477" y2="30" />
+              <line x1="463" y1="220" x2="477" y2="220" />
+              <line x1="466" y1="125" x2="474" y2="125" />
+            </g>
+          </svg>
+          <div class="hero__body">
+            <p class="eyebrow">Plate I &middot; Universe</p>
+            <h1 style="font-size: var(--t-display); letter-spacing: -0.03em; max-width: 22ch; margin: 0.3rem 0 0.5rem">
+              Screen the index.<br />Then size the trade.
+            </h1>
+            <p class="soft" style="max-width: 46ch">
+              Filter by sector and by what the numbers say, read what the news is
+              actually discussing, then get an entry ceiling and a share count with
+              the arithmetic shown.
+            </p>
+            <div class="row wrap" style="margin-top: 0.9rem; gap: 0.4rem">
+              <span class="tag tag--mint" id="universe-badge">Universe: loading…</span>
+              <span class="tag tag--neutral" id="data-badge">Prices: no key</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIVE THEMES -->
+        <div class="card plate card-pad">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Plate II &middot; What the news is discussing</p>
+              <h2 style="font-size: var(--t-h1); margin-top: 0.2rem">Live themes</h2>
+            </div>
+            <button class="btn btn--sm" id="btn-themes">Find themes</button>
+          </div>
+          <div id="themes-body">
+            <div class="empty">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="46" cy="52" r="30" fill="#dceadf" />
+                <path d="M 30 20 L 38 17 L 62 92 L 54 95 Z" fill="#bcd4bd" />
+                <path d="M 100 34 A 22 22 0 0 0 78 56 L 100 56 Z" fill="#fbeecf" />
+                <rect x="66" y="66" width="28" height="28" rx="1" fill="#e7efe3" />
+              </svg>
+              <p class="t-sm muted" style="max-width: 42ch">
+                Themes are read from the last seven days of headlines, grouped by
+                sector. Needs a NewsAPI key for the headlines and an OpenRouter key
+                to name the themes.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- SCREENER + DETAIL -->
+        <div class="grid-side">
+          <div class="card plate card-pad">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Plate III &middot; Screener</p>
+                <h2 style="font-size: var(--t-h1); margin-top: 0.2rem">Companies</h2>
+              </div>
+              <span class="t-xs muted" id="screener-count">—</span>
+            </div>
+
+            <div class="stack" style="gap: 0.7rem; margin-bottom: 0.9rem">
+              <div>
+                <label class="field-label" for="search">Search</label>
+                <input type="search" id="search" placeholder="Ticker, company or sector…" autocomplete="off" />
+              </div>
+
+              <div>
+                <p class="field-label">Sector</p>
+                <div class="row wrap" style="gap: 0.35rem" id="sector-chips"></div>
+              </div>
+
+              <details>
+                <summary class="t-sm soft" style="cursor: pointer">Metric filters</summary>
+                <div class="grid-2" style="gap: 0.7rem; margin-top: 0.7rem">
+                  <div>
+                    <label class="field-label" for="f-pe-max">Max P/E</label>
+                    <input type="number" id="f-pe-max" placeholder="any" min="0" step="1" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="f-yield-min">Min dividend yield %</label>
+                    <input type="number" id="f-yield-min" placeholder="any" min="0" step="0.1" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="f-vol-max">Max volatility %</label>
+                    <input type="number" id="f-vol-max" placeholder="any" min="0" step="1" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="f-mom-min">Min 3-month return %</label>
+                    <input type="number" id="f-mom-min" placeholder="any" step="1" />
+                  </div>
+                </div>
+                <p class="t-xs muted" style="margin-top: 0.5rem">
+                  Metric filters apply to names whose data has been loaded. Load
+                  metrics for the visible page first — free API tiers do not allow
+                  fetching the whole index at once.
+                </p>
+                <button class="btn btn--sm" id="btn-load-metrics" style="margin-top: 0.5rem">Load metrics for visible</button>
+              </details>
+            </div>
+
+            <div class="table-wrap">
+              <table id="screener-table">
+                <thead>
+                  <tr>
+                    <th class="sortable" data-sort="symbol">Name</th>
+                    <th class="sortable num" data-sort="price">Price</th>
+                    <th class="sortable num" data-sort="ret3m">3M</th>
+                    <th class="sortable num" data-sort="vol">Vol</th>
+                    <th class="sortable num" data-sort="peTtm">P/E</th>
+                    <th class="sortable num" data-sort="dividendYield">Yield</th>
+                  </tr>
+                </thead>
+                <tbody id="screener-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ASSUMPTIONS -->
+          <div class="card plate card-pad">
+            <p class="eyebrow">Plate IV &middot; Your assumptions</p>
+            <h2 style="font-size: var(--t-h2); margin: 0.2rem 0 0.15rem">Sizing inputs</h2>
+            <p class="t-xs muted" style="margin-bottom: 0.9rem">
+              Every figure on the right is computed from these. Change them and the
+              analysis changes — they are yours, not defaults dressed up as advice.
+            </p>
+
+            <div class="stack" style="gap: 0.75rem">
+              <div>
+                <label class="field-label" for="a-portfolio">Account size ($)</label>
+                <input type="number" id="a-portfolio" class="input-num" value="100000" min="1000" step="1000" />
+              </div>
+              <div>
+                <label class="field-label" for="a-risk">Risk per trade: <span id="a-risk-out" class="num">1.0%</span></label>
+                <input type="range" id="a-risk" min="0.25" max="3" step="0.25" value="1" />
+              </div>
+              <div>
+                <label class="field-label" for="a-mos">Margin of safety: <span id="a-mos-out" class="num">15%</span></label>
+                <input type="range" id="a-mos" min="0" max="40" step="5" value="15" />
+              </div>
+              <div>
+                <label class="field-label" for="a-rr">Minimum reward:risk: <span id="a-rr-out" class="num">2.0:1</span></label>
+                <input type="range" id="a-rr" min="1" max="4" step="0.5" value="2" />
+              </div>
+              <div>
+                <label class="field-label" for="a-atr">ATR stop multiple: <span id="a-atr-out" class="num">2.0x</span></label>
+                <input type="range" id="a-atr" min="1" max="4" step="0.5" value="2" />
+              </div>
+              <div>
+                <label class="field-label" for="a-maxw">Max position weight: <span id="a-maxw-out" class="num">20%</span></label>
+                <input type="range" id="a-maxw" min="5" max="40" step="5" value="20" />
+              </div>
+            </div>
+
+            <div class="callout" style="margin-top: 1rem">
+              Educational analysis under the assumptions above — not investment
+              advice, and not a recommendation to buy or sell anything.
+            </div>
+          </div>
+        </div>
+
+        <!-- SINGLE NAME DETAIL -->
+        <div id="detail-panel" hidden></div>
+      </div>
+    </section>
+
+    <!-- ================================================= PORTFOLIO VIEW -->
+    <section class="view" id="view-portfolio" role="tabpanel" aria-labelledby="tab-portfolio" hidden>
+      <div class="stack-lg">
+
+        <div class="hero">
+          <svg class="hero__art" viewBox="0 0 560 250" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+            <rect x="286" y="86" width="120" height="120" rx="2" fill="#14352a" />
+            <circle cx="286" cy="106" r="88" fill="#2f7d4f" />
+            <path d="M 236 -26 L 264 -34 L 330 280 L 298 288 Z" fill="#e7efe3" />
+            <path d="M 470 96 A 46 46 0 0 0 424 142 L 470 142 Z" fill="#d08b1f" />
+            <g fill="#bcd4bd">
+              <circle cx="452" cy="52" r="9" />
+              <circle cx="486" cy="52" r="9" />
+              <circle cx="520" cy="52" r="9" />
+            </g>
+          </svg>
+          <div class="hero__body">
+            <p class="eyebrow">Plate V &middot; Your book</p>
+            <h1 style="font-size: var(--t-display); letter-spacing: -0.03em; max-width: 20ch; margin: 0.3rem 0 0.5rem">
+              Import it.<br />Then pull a handle.
+            </h1>
+            <p class="soft" style="max-width: 46ch">
+              Upload a CSV or Excel export of your holdings. Live prices, real risk
+              analytics, and seven rebalancing objectives — each returning the exact
+              trades and what they change.
+            </p>
+          </div>
+        </div>
+
+        <!-- IMPORT -->
+        <div id="import-panel">
+          <div class="card plate card-pad">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Plate VI &middot; Import</p>
+                <h2 style="font-size: var(--t-h1); margin-top: 0.2rem">Load your holdings</h2>
+              </div>
+            </div>
+
+            <div class="dropzone" id="dropzone">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="44" cy="50" r="28" fill="#dceadf" />
+                <rect x="56" y="56" width="34" height="34" rx="1" fill="#bcd4bd" />
+                <path d="M 28 18 L 36 15 L 58 88 L 50 91 Z" fill="#2f7d4f" />
+                <path d="M 104 26 A 20 20 0 0 0 84 46 L 104 46 Z" fill="#d08b1f" />
+              </svg>
+              <div>
+                <p style="font-weight: 600">Drop a CSV or Excel file here</p>
+                <p class="t-sm muted">or choose one — nothing leaves your browser</p>
+              </div>
+              <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xls" class="sr-only" />
+              <div class="row wrap" style="gap: 0.5rem; justify-content: center">
+                <button class="btn btn--primary" id="btn-choose">Choose file</button>
+                <button class="btn btn--ghost btn--sm" id="btn-sample">Use a sample book</button>
+              </div>
+            </div>
+
+            <details style="margin-top: 1rem">
+              <summary class="t-sm soft" style="cursor: pointer">What the file needs</summary>
+              <div class="t-sm soft" style="margin-top: 0.6rem">
+                <p style="margin-bottom: 0.4rem">
+                  One row per position, with a header row. Column names are detected
+                  automatically — <span class="mono">ticker</span>,
+                  <span class="mono">symbol</span>, <span class="mono">quantity</span>,
+                  <span class="mono">shares</span>, <span class="mono">cost</span>,
+                  <span class="mono">avg price</span> and common German equivalents all
+                  work — and you can correct the mapping after loading.
+                </p>
+                <pre class="mono t-xs" style="background: var(--creme-deep); padding: 0.7rem; border-radius: 7px; overflow-x: auto">ticker,quantity,cost_basis
+AAPL,40,182.40
+MSFT,15,395.10
+XOM,60,104.25</pre>
+                <p style="margin-top: 0.4rem">
+                  Cost basis is per share and optional — without it you get valuation
+                  and risk, but no profit and loss.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- MAPPING (shown after a file is parsed) -->
+        <div id="mapping-panel" hidden></div>
+
+        <!-- PORTFOLIO BODY -->
+        <div id="portfolio-body" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- KEYS MODAL -->
+  <div class="overlay" id="keys-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keys-title">
+      <div class="row-between" style="margin-bottom: 0.3rem">
+        <h2 id="keys-title" style="font-size: var(--t-h1)">API keys</h2>
+        <button class="btn btn--sm btn--ghost" id="btn-keys-close">Close</button>
+      </div>
+      <p class="t-sm muted" style="margin-bottom: 1rem">
+        Keys stay in this browser (localStorage) and are sent only to the service
+        they belong to. Nothing is committed, logged or proxied. Every key is
+        optional — the app tells you what each one unlocks and shows “—” for
+        anything it cannot compute without one.
+      </p>
+
+      <div class="stack" style="gap: 0.85rem">
+        <div>
+          <label class="field-label" for="k-twelve">Twelve Data — prices and history</label>
+          <input type="password" id="k-twelve" placeholder="Twelve Data key" autocomplete="off" />
+          <p class="t-xs muted" style="margin-top: 0.2rem">
+            Free tier: 8 requests/minute, 800/day.
+            <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">Get a key</a>
+          </p>
+        </div>
+        <div>
+          <label class="field-label" for="k-fmp">Financial Modeling Prep — fundamentals</label>
+          <input type="password" id="k-fmp" placeholder="FMP key" autocomplete="off" />
+          <p class="t-xs muted" style="margin-top: 0.2rem">
+            Unlocks the full S&amp;P 500 constituent list, P/E, yields and targets.
+            <a href="https://financialmodelingprep.com/developer/docs" target="_blank" rel="noopener">Get a key</a>
+          </p>
+        </div>
+        <div>
+          <label class="field-label" for="k-news">NewsAPI — headlines</label>
+          <input type="password" id="k-news" placeholder="NewsAPI key" autocomplete="off" />
+          <p class="t-xs muted" style="margin-top: 0.2rem">
+            Powers the live themes and the news read on your holdings.
+            <a href="https://newsapi.org" target="_blank" rel="noopener">Get a key</a>
+          </p>
+        </div>
+        <div>
+          <label class="field-label" for="k-openrouter">OpenRouter — written notes</label>
+          <input type="password" id="k-openrouter" placeholder="sk-or-…" autocomplete="off" />
+          <p class="t-xs muted" style="margin-top: 0.2rem">
+            The model explains the computed numbers; it never calculates them.
+            <a href="https://openrouter.ai" target="_blank" rel="noopener">Get a key</a>
+          </p>
+        </div>
+      </div>
+
+      <div class="row" style="gap: 0.5rem; margin-top: 1.2rem">
+        <button class="btn btn--primary" id="btn-keys-save">Save keys</button>
+        <button class="btn btn--ghost" id="btn-keys-clear">Clear all</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <div class="swatches" aria-hidden="true">
+        <i style="background: #14352a"></i>
+        <i style="background: #24693b"></i>
+        <i style="background: #7ba883"></i>
+        <i style="background: #bcd4bd"></i>
+        <i style="background: #e7efe3"></i>
+        <i style="background: #d08b1f"></i>
+        <span class="eyebrow" style="margin-left: 0.4rem">Palette &middot; green range, one ochre</span>
+      </div>
+      <p>
+        <strong>Aura III</strong> — Day 3, built from scratch. Generative AI in Finance,
+        Executive Academy WU.
+      </p>
+      <p>
+        Educational analysis only, not investment advice. Every number is computed in
+        the browser from data you supply keys for; figures that cannot be computed are
+        shown as “—” rather than estimated.
+      </p>
+    </div>
+  </footer>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
