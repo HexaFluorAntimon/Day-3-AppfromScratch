@@ -838,15 +838,6 @@ async function findThemes() {
 
 /* ------------------------------------------------------- portfolio import --- */
 
-const SAMPLE_CSV = `ticker,quantity,cost_basis
-AAPL,40,182.40
-MSFT,15,395.10
-NVDA,25,98.60
-XOM,60,104.25
-JNJ,30,152.80
-JPM,20,178.40
-PG,25,158.90
-NEE,45,66.20`;
 
 async function handleFile(file) {
   const name = file.name.toLowerCase();
@@ -1776,7 +1767,6 @@ function init() {
   el('file-input').addEventListener('change', (e) => {
     if (e.target.files?.[0]) handleFile(e.target.files[0]);
   });
-  el('btn-sample').addEventListener('click', () => ingestRows(parseCsv(SAMPLE_CSV), 'sample-book.csv'));
   el('btn-demo-book').addEventListener('click', () => {
     // Ten names the archive prices, so the risk model and every handle run.
     if (!state.demo) setDemo(true);
