@@ -21,9 +21,13 @@ Built for **Generative AI in Finance**, Executive Academy WU — Day 3 repositor
 
 ## Try it without keys
 
-The app ships with a **synthetic demo archive**, so every panel can be explored
-with no API keys at all — click *Explore with demo data* on the Screener, or
-*Load the demo book* on the Portfolio tab.
+The app ships with a **synthetic demo archive** and turns it on automatically on
+a first visit with no keys, so every panel is populated the moment the page
+opens. On the Portfolio tab, *Load the demo book* fills the second half.
+
+Turning it off is one click in the banner, and that choice is remembered — the
+automatic default only applies before any choice has been made, and never when a
+key is already stored.
 
 It is labelled as synthetic wherever it appears: an ochre banner explains it, and
 an ochre **Demo data** pill sits in the sticky header so the label cannot scroll

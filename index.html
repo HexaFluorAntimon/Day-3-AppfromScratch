@@ -133,6 +133,10 @@
               </div>
               <span class="t-xs muted" id="screener-count">—</span>
             </div>
+            <div class="row" style="gap:0.4rem;margin-bottom:0.6rem">
+              <span class="tag tag--mint">Click a row</span>
+              <span class="t-xs muted">to size the trade in Plate V below</span>
+            </div>
 
             <div class="stack" style="gap: 0.7rem; margin-bottom: 0.9rem">
               <div>
@@ -240,8 +244,34 @@
           </div>
         </div>
 
-        <!-- SINGLE NAME DETAIL -->
-        <div id="detail-panel" hidden></div>
+        <!-- SINGLE NAME DETAIL — present from the start, so the panel is never a
+             blank space the reader has to discover by clicking. -->
+        <div id="detail-panel">
+          <div class="card plate card-pad">
+            <p class="eyebrow">Plate V &middot; Entry and size</p>
+            <h2 style="font-size: var(--t-h1); margin-top: 0.2rem">No company selected</h2>
+            <div class="empty" style="margin-top: 0.9rem">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="44" cy="50" r="28" fill="#dceadf" />
+                <path d="M 28 18 L 36 15 L 58 88 L 50 91 Z" fill="#bcd4bd" />
+                <rect x="56" y="58" width="32" height="32" rx="1" fill="#e7efe3" />
+                <path d="M 104 26 A 20 20 0 0 0 84 46 L 104 46 Z" fill="#d08b1f" />
+              </svg>
+              <div>
+                <p class="t-sm soft" style="max-width: 52ch">
+                  <strong>Pick any row in the table above</strong> — every company is
+                  clickable. This panel then works out the highest price still worth
+                  paying, how many shares that is against your risk budget, and where
+                  the stop belongs.
+                </p>
+                <p class="t-xs muted" style="margin-top: 0.4rem">
+                  All four entry anchors are shown, with the binding one named and any
+                  that could not be computed listed with the reason.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -262,7 +292,7 @@
             </g>
           </svg>
           <div class="hero__body">
-            <p class="eyebrow">Plate V &middot; Your book</p>
+            <p class="eyebrow">Plate VI &middot; Your book</p>
             <h1 style="font-size: var(--t-display); letter-spacing: -0.03em; max-width: 20ch; margin: 0.3rem 0 0.5rem">
               Import it.<br />Then pull a handle.
             </h1>
@@ -279,7 +309,7 @@
           <div class="card plate card-pad">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Plate VI &middot; Import</p>
+                <p class="eyebrow">Plate VII &middot; Import</p>
                 <h2 style="font-size: var(--t-h1); margin-top: 0.2rem">Load your holdings</h2>
               </div>
             </div>

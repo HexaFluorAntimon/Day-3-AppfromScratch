@@ -121,6 +121,17 @@ function saveKeys() {
   } catch {
     toast('Could not save keys to this browser — they will work for this session only.', 'accent');
   }
+  const covered = ['twelve', 'fmp', 'news'].every((k) => state.keys[k]);
+  if (state.demo && covered) {
+    // Nothing synthetic would be left to show, so leave demo mode rather than
+    // keeping a banner about an archive that is no longer being read.
+    state.demo = false;
+    try { localStorage.setItem(DEMO_STORE, '0'); } catch { /* ignore */ }
+    toast('All three data keys saved — the archive is off and everything is live.');
+  } else if (state.demo && keyCount() > 0) {
+    toast('Saved. Those services are live now; the archive still covers the rest.');
+  }
+
   clearCache();
   renderKeyStatus();
   renderDemoBanner();
@@ -231,9 +242,8 @@ function demoServices() {
 function setDemo(on) {
   state.demo = on;
   try {
-    if (on) localStorage.setItem(DEMO_STORE, '1');
-    else localStorage.removeItem(DEMO_STORE);
-  } catch { /* private mode: demo lasts for this tab only */ }
+    localStorage.setItem(DEMO_STORE, on ? '1' : '0');
+  } catch { /* private mode: the choice lasts for this tab only */ }
 
   clearCache();
   state.metrics.clear();
@@ -242,7 +252,6 @@ function setDemo(on) {
   state.marketReturns = null;
   state.sectorPe = null;
   state.selected = null;
-  el('detail-panel').hidden = true;
 
   renderDemoBanner();
   renderKeyStatus();
@@ -298,7 +307,8 @@ function renderDemoBanner() {
       <span>
         Showing a <strong>synthetic archive</strong> for ${esc(services.join(', '))} — generated
         numbers, not market data.${live ? ' Your keys are live for the rest.' : ''}
-        Add API keys and this switches to live automatically.
+        Each service switches to live the moment its key is saved, or turn the
+        archive off here.
       </span>
       <button class="btn btn--sm" id="btn-demo-off">Turn off</button>
     </div>`;
@@ -496,7 +506,6 @@ async function selectCompany(symbol) {
   renderScreener();
 
   const panel = el('detail-panel');
-  panel.hidden = false;
   panel.innerHTML = `<div class="card plate card-pad"><div class="loading"><div class="spinner"></div><p class="loading__text">Analysing ${esc(symbol)}</p></div></div>`;
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -524,7 +533,7 @@ async function selectCompany(symbol) {
 
     renderDetail({ company, metrics, fundamentals, target, sectorPe, bars });
   } catch (err) {
-    panel.innerHTML = `<div class="card plate card-pad"><p class="eyebrow">Plate VII &middot; ${esc(symbol)}</p>
+    panel.innerHTML = `<div class="card plate card-pad"><p class="eyebrow">Plate V &middot; ${esc(symbol)}</p>
       <div class="callout callout--clay" style="margin-top:0.6rem">Could not analyse ${esc(symbol)}: ${esc(err.message)}</div></div>`;
   }
 }
@@ -606,7 +615,7 @@ function renderDetail({ company, metrics, fundamentals, target, sectorPe, bars }
     <div class="card plate card-pad">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Plate VII &middot; Entry and size</p>
+          <p class="eyebrow">Plate V &middot; Entry and size</p>
           <h2 style="font-size:var(--t-h1);margin-top:0.2rem">
             <span class="sym" style="font-size:1.1em">${esc(company.symbol)}</span>
             <span class="soft" style="font-weight:500;font-size:0.8em"> ${esc(company.name)}</span>
@@ -792,7 +801,8 @@ async function findThemes() {
       const text = await generate(buildThemePrompt(sectorHeadlines), state.keys.openRouter, { maxTokens: 900 });
       themesHtml = `<div class="note">${markdownToHtml(text)}</div>`;
     } else {
-      themesHtml = `<div class="callout">Headline counts above are live. Add an OpenRouter key to have the themes named and tied back to the specific stories.</div>`;
+      const sourceWord = state.keys.news ? 'live' : 'from the demo archive';
+      themesHtml = `<div class="callout">Headline counts above are ${sourceWord}. Add an OpenRouter key to have the themes named and tied back to the specific stories.</div>`;
     }
 
     const movesNote = movesError
@@ -892,7 +902,7 @@ function renderMapping(label) {
     <div class="card plate card-pad">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Plate VI &middot; Column mapping</p>
+          <p class="eyebrow">Plate VII &middot; Column mapping</p>
           <h2 style="font-size:var(--t-h1);margin-top:0.2rem">Check the mapping</h2>
           <p class="t-xs muted">${esc(label)} &middot; ${state.rawRows.length - 1} data row${state.rawRows.length === 2 ? '' : 's'}</p>
         </div>
@@ -1099,7 +1109,7 @@ function renderPortfolio() {
       <div class="card plate card-pad">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Plate VII &middot; Overview</p>
+            <p class="eyebrow">Plate VIII &middot; Overview</p>
             <h2 style="font-size:var(--t-h1);margin-top:0.2rem">${state.holdings.length} positions</h2>
             <p class="t-xs muted">${v.pricedCount} priced live${v.unpriced.length ? ` &middot; no quote for ${esc(v.unpriced.join(', '))}` : ''}</p>
           </div>
@@ -1162,7 +1172,7 @@ function renderPortfolio() {
       <div class="card plate card-pad">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Plate VIII &middot; Risk</p>
+            <p class="eyebrow">Plate IX &middot; Risk</p>
             <h2 style="font-size:var(--t-h1);margin-top:0.2rem">Risk model</h2>
           </div>
           <button class="btn btn--sm" id="btn-risk">${risk ? 'Reload risk model' : 'Load risk model'}</button>
@@ -1179,7 +1189,7 @@ function renderPortfolio() {
       <div class="card plate card-pad">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Plate IX &middot; Current events</p>
+            <p class="eyebrow">Plate XI &middot; Current events</p>
             <h2 style="font-size:var(--t-h1);margin-top:0.2rem">What the news bears on</h2>
           </div>
           <button class="btn btn--sm btn--accent" id="btn-pf-note">Read my book</button>
@@ -1640,11 +1650,22 @@ function wireAssumptions() {
 
 function init() {
   loadKeys();
+  // First visit with no keys: start in demo mode rather than showing a grid of
+  // em dashes. `DEMO_STORE` records a deliberate choice either way, so turning it
+  // off stays off — the default only applies before any choice has been made.
   try {
-    state.demo = localStorage.getItem(DEMO_STORE) === '1';
-  } catch { /* private mode: start live-only */ }
+    const stored = localStorage.getItem(DEMO_STORE);
+    if (stored === '1') state.demo = true;
+    else if (stored === '0') state.demo = false;
+    else state.demo = keyCount() === 0;
+  } catch {
+    state.demo = keyCount() === 0;
+  }
+  // Order matters: the demo flag is resolved after loadKeys() ran, so the badges
+  // it painted are stale — repaint them before anything is shown.
   renderDemoBanner();
   if (state.demo && !state.keys.twelve) primeDemoMetrics();
+  renderKeyStatus();
 
   el('tab-screener').addEventListener('click', () => setView('screener'));
   el('tab-portfolio').addEventListener('click', () => setView('portfolio'));

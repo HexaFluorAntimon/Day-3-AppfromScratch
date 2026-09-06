@@ -77,6 +77,10 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* `hidden` must win over any display a class sets, or an element toggled with
+   el.hidden = true stays on screen whenever it also carries .row, .grid-* etc. */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -711,3 +715,8 @@ td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-
 }
 .demo-pill[hidden] { display: none; }
 @media (max-width: 520px) { .demo-pill { font-size: 0.6rem; padding: 0.2rem 0.45rem; } }
+
+/* The screener rows are the way into Plate V, so they have to look operable. */
+#screener-body tr { transition: background 0.12s ease; }
+#screener-body tr:hover td { background: var(--green-05); }
+#screener-body tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--green-60); }
