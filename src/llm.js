@@ -152,7 +152,7 @@ Cite only figures from the DATA block. Where something is unavailable, say so.`;
 }
 
 /** The portfolio note: reads the computed analytics, not the raw holdings. */
-export function buildPortfolioPrompt({ summary, stats, sectors, concentration, topPositions, headlines, handleResult }) {
+export function buildPortfolioPrompt({ summary, stats, sectors, concentration, topPositions, headlines, handleResult, structure }) {
   const sectorLines = sectors.slice(0, 8).map((s) => `- ${s.sector}: ${pct(s.weight)}`).join('\n');
   const positionLines = topPositions
     .map((p) => `- ${p.symbol}: ${pct(p.weight)} of the book, P/L ${p.pnlPct === null ? 'unavailable' : fmt(p.pnlPct, 1, '%')}`)
@@ -191,6 +191,19 @@ CONCENTRATION
 - Effective number of names: ${fmt(concentration.effectiveNames, 1)} out of ${summary.positionCount}
 - Top five weight: ${pct(concentration.top5)}
 
+TAIL RISK (from the realised distribution, not a normal assumption)
+- Value at risk, 95% one-day: ${structure?.tail ? `$${Math.abs(structure.tail.varMoney).toFixed(0)} (${pct(structure.tail.varPct, 2)})` : 'unavailable'}
+- Expected shortfall on those days: ${structure?.tail ? `$${Math.abs(structure.tail.esMoney).toFixed(0)} (${pct(structure.tail.esPct, 2)})` : 'unavailable'}
+- Worst session on record: ${structure?.extremes?.worst ? `${pct(structure.extremes.worst.pct, 2)} on ${structure.extremes.worst.date}, $${Math.abs(structure.extremes.worst.money).toFixed(0)}` : 'unavailable'}
+- Share of sessions closing up: ${structure?.hitRate !== undefined ? pct(structure.hitRate, 0) : 'unavailable'}
+
+DIVERSIFICATION
+- Diversification ratio: ${structure?.diversification ? `${fmt(structure.diversification.ratio, 2)}x` : 'unavailable'}
+- Weighted average volatility of the parts: ${structure?.diversification ? pct(structure.diversification.weightedAvgVol) : 'unavailable'}
+- Volatility of the whole: ${structure?.diversification ? pct(structure.diversification.portfolioVol) : 'unavailable'}
+- Effective independent bets: ${structure?.diversification ? fmt(structure.diversification.independentBets, 1) : 'unavailable'} out of ${summary.positionCount} positions
+- Most correlated pairs: ${structure?.pairs?.length ? structure.pairs.map((p) => `${p.a}/${p.b} ${p.rho.toFixed(2)}`).join(', ') : 'unavailable'}
+
 SECTOR MIX
 ${sectorLines}
 
@@ -202,14 +215,21 @@ RECENT HEADLINES ACROSS THE HOLDINGS
 ${newsLines}
 
 TASK
-Write at most 280 words, in this shape:
+Write at most 380 words, in this shape:
 
 ## Where this book stands
 What the value, P/L and risk figures actually say.
 
 ## The concentration question
-Read the Herfindahl and top-five figures against the effective name count, and
-say whether that is a problem for a book of this size.
+Read the Herfindahl and top-five figures against the effective name count AND
+against the number of independent bets. If the diversification ratio says the
+names overlap, name the specific pair or sector doing it, and say what that
+means for a book this size.
+
+## What a bad day costs
+State the value at risk and expected shortfall in money, and anchor them to the
+worst session that actually happened. Say plainly whether that is a loss this
+book can absorb given its size.
 
 ## What the news bears on
 Connect the headlines to the specific holdings or sectors they touch. If a

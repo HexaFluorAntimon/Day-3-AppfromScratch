@@ -13,7 +13,9 @@ import { priceMetrics, entryCeiling, positionSizing, entryLadder, simpleReturns 
 import {
   parseCsv, guessMapping, buildHoldings, valueHoldings, concentration,
   sectorAllocation, alignReturns, covarianceMatrix, correlationFromCov,
-  portfolioRiskStats, riskContributions, portfolioVol
+  portfolioRiskStats, riskContributions, portfolioVol, portfolioReturnSeries,
+  tailRisk, diversificationRatio, topCorrelatedPairs, correlationToBook,
+  extremeDays, hitRate
 } from './src/portfolio.js';
 import { HANDLES, tradesFor, meanDailyReturns, annualisedFor, volFor } from './src/optimize.js';
 import { buildStockPrompt, buildPortfolioPrompt, buildThemePrompt, generate, markdownToHtml } from './src/llm.js';
@@ -590,7 +592,16 @@ async function findThemes() {
          </div>`
       : '';
 
-    const moves = await fetchSectorMoves(state.keys.twelve, ranking.map((r) => r.sector));
+    // The proxy-ETF prices are a garnish on the story counts. Twelve Data's free
+    // tier bills per symbol, so this is the call most likely to hit a 429 — and a
+    // price failure must not take the news panel down with it.
+    let moves = new Map();
+    let movesError = null;
+    try {
+      moves = await fetchSectorMoves(state.keys.twelve, ranking.slice(0, 6).map((r) => r.sector));
+    } catch (err) {
+      movesError = err.message;
+    }
 
     const coverageHtml = `<div class="grid-3" style="gap:0.6rem;margin-bottom:1rem">
       ${ranking
@@ -618,7 +629,10 @@ async function findThemes() {
       themesHtml = `<div class="callout">Headline counts above are live. Add an OpenRouter key to have the themes named and tied back to the specific stories.</div>`;
     }
 
-    body.innerHTML = partialWarning + coverageHtml + themesHtml;
+    const movesNote = movesError
+      ? `<p class="t-xs muted" style="margin-bottom:0.6rem">Sector proxy prices unavailable: ${esc(movesError)}</p>`
+      : '';
+    body.innerHTML = partialWarning + movesNote + coverageHtml + themesHtml;
     body.querySelectorAll('[data-theme-sector]').forEach((card) =>
       card.addEventListener('click', () => {
         state.sectorFilter = card.dataset.themeSector;
@@ -856,6 +870,17 @@ async function loadRiskModel() {
     contributions: riskContributions(normalised, cov)
   };
 
+  // Everything below reads the matrices already built above — no extra requests.
+  const series = portfolioReturnSeries(aligned.returns, aligned.symbols, normalised);
+  const value = state.valued.totalValue;
+  state.risk.series = series;
+  state.risk.tail = tailRisk(series, value, 0.95);
+  state.risk.diversification = diversificationRatio(normalised, cov);
+  state.risk.pairs = topCorrelatedPairs(state.risk.correlation, aligned.symbols, 5);
+  state.risk.bookCorrelation = correlationToBook(state.risk.correlation, aligned.symbols);
+  state.risk.extremes = extremeDays(series, aligned.dates, value);
+  state.risk.hitRate = hitRate(series);
+
   btn.disabled = false;
   btn.textContent = 'Reload risk model';
   renderPortfolio();
@@ -1038,7 +1063,111 @@ function renderRiskBlock(risk) {
     </div>
     <p class="eyebrow" style="margin-bottom:0.5rem">Risk contribution vs capital weight</p>
     ${contribRows}
-    <p class="t-xs muted">An ochre bar marks a position supplying more risk than its capital share — the ones that dominate quietly.</p>`;
+    <p class="t-xs muted" style="margin-bottom:1.2rem">An ochre bar marks a position supplying more risk than its capital share — the ones that dominate quietly.</p>
+
+    ${renderTailBlock(risk)}
+    ${renderStructureBlock(risk)}
+    ${renderHeatmap(risk)}`;
+}
+
+/** What a bad day costs, in money rather than in standard deviations. */
+function renderTailBlock(risk) {
+  const t = risk.tail;
+  const e = risk.extremes;
+  if (!t) return '';
+
+  return `
+    <div class="card card--sunk card-pad" style="margin-bottom:1.1rem">
+      <p class="eyebrow" style="margin-bottom:0.7rem">What a bad day costs</p>
+      <div class="grid-4">
+        <div class="metric"><span class="metric__label">Value at risk (95%, 1d)</span>
+          <span class="metric__value is-down">${money0(t.varMoney)}</span>
+          <span class="metric__note">${pct(t.varPct, 2)} — the worst day in 20</span></div>
+        <div class="metric"><span class="metric__label">Expected shortfall</span>
+          <span class="metric__value is-down">${money0(t.esMoney)}</span>
+          <span class="metric__note">average of the worst ${t.tailDays} days</span></div>
+        <div class="metric"><span class="metric__label">Worst day on record</span>
+          <span class="metric__value is-down">${e ? money0(e.worst.money) : DASH}</span>
+          <span class="metric__note">${e?.worst.date ? `${pct(e.worst.pct, 2)} on ${esc(e.worst.date)}` : DASH}</span></div>
+        <div class="metric"><span class="metric__label">Sessions closing up</span>
+          <span class="metric__value">${pct(risk.hitRate, 0)}</span>
+          <span class="metric__note">of ${t.observations} days</span></div>
+      </div>
+      <p class="t-xs muted" style="margin-top:0.6rem">
+        Read from the realised distribution of these weights, not a normal curve —
+        equity tails are fatter than the bell, exactly where it matters.
+      </p>
+    </div>`;
+}
+
+/** How much diversification the book is actually earning. */
+function renderStructureBlock(risk) {
+  const d = risk.diversification;
+  if (!d) return '';
+
+  const pairs = (risk.pairs ?? []).map((p) => {
+    const tone = p.rho > 0.8 ? 'tag--down' : p.rho > 0.6 ? 'tag--accent' : 'tag--mint';
+    return `<span class="tag ${tone}">${esc(p.a)} · ${esc(p.b)} ${p.rho.toFixed(2)}</span>`;
+  }).join(' ');
+
+  const bets = d.independentBets;
+  const names = risk.symbols.length;
+  const verdict = bets < names * 0.45
+    ? `These ${names} positions behave like <strong>${bets.toFixed(1)} independent bets</strong> — the names overlap more than the count suggests.`
+    : `These ${names} positions behave like <strong>${bets.toFixed(1)} independent bets</strong>, which is genuine diversification for a book this size.`;
+
+  return `
+    <div class="card card--sunk card-pad" style="margin-bottom:1.1rem">
+      <p class="eyebrow" style="margin-bottom:0.7rem">Is the diversification real?</p>
+      <div class="grid-3" style="gap:0.9rem;margin-bottom:0.7rem">
+        <div class="metric"><span class="metric__label">Diversification ratio</span>
+          <span class="metric__value">${num(d.ratio, 2)}×</span>
+          <span class="metric__note">1.0 = one bet in many names</span></div>
+        <div class="metric"><span class="metric__label">Volatility saved</span>
+          <span class="metric__value is-up">${pct(d.volSaved, 1)}</span>
+          <span class="metric__note">${pct(d.weightedAvgVol, 1)} apart → ${pct(d.portfolioVol, 1)} together</span></div>
+        <div class="metric"><span class="metric__label">Independent bets</span>
+          <span class="metric__value">${num(bets, 1)}</span>
+          <span class="metric__note">out of ${names} positions</span></div>
+      </div>
+      <p class="t-sm soft">${verdict}</p>
+      ${pairs ? `<p class="eyebrow" style="margin:0.9rem 0 0.4rem">Most correlated pairs — one bet, not two</p>
+        <div class="row wrap" style="gap:0.35rem">${pairs}</div>` : ''}
+    </div>`;
+}
+
+/** The correlation matrix, as a matrix. */
+function renderHeatmap(risk) {
+  const c = risk.correlation;
+  const syms = risk.symbols;
+  if (!c || syms.length < 2 || syms.length > 14) return '';
+
+  const shade = (rho) => {
+    if (!Number.isFinite(rho)) return 'background:var(--creme-deep);color:var(--ink-mute)';
+    // One hue, varying weight: dark green = moves together, pale = independent.
+    const t = Math.max(0, Math.min(1, (rho + 0.2) / 1.2));
+    const bg = `color-mix(in srgb, var(--green-60) ${(t * 100).toFixed(0)}%, var(--creme))`;
+    return `background:${bg};color:${t > 0.55 ? '#fff' : 'var(--ink)'}`;
+  };
+
+  const header = `<tr><th style="position:static"></th>${syms
+    .map((sy) => `<th class="num" style="position:static;padding:0.3rem 0.15rem">${esc(sy)}</th>`).join('')}</tr>`;
+
+  const rows = syms.map((sy, i) => `
+    <tr><td class="sym" style="padding:0.3rem 0.5rem 0.3rem 0">${esc(sy)}</td>
+      ${syms.map((_, j) => `<td style="padding:2px"><div class="heat-cell" style="${shade(c[i][j])}">${
+        Number.isFinite(c[i][j]) ? c[i][j].toFixed(2) : DASH}</div></td>`).join('')}
+    </tr>`).join('');
+
+  return `
+    <div class="card card--sunk card-pad">
+      <p class="eyebrow" style="margin-bottom:0.7rem">Correlation matrix</p>
+      <div class="scroll-x"><table style="width:auto">${header}${rows}</table></div>
+      <p class="t-xs muted" style="margin-top:0.6rem">
+        Darker means the pair moved together over the ${risk.stats.observations} sessions
+        modelled. Dark blocks are where the diversification you think you have goes missing.
+      </p>
+    </div>`;
 }
 
 function renderHandlesBlock() {
@@ -1247,7 +1376,14 @@ async function writePortfolioNote() {
       concentration: concentration(v.holdings.map((h) => h.weight)),
       topPositions: top,
       headlines,
-      handleResult
+      handleResult,
+      structure: {
+        tail: state.risk.tail,
+        diversification: state.risk.diversification,
+        pairs: state.risk.pairs,
+        extremes: state.risk.extremes,
+        hitRate: state.risk.hitRate
+      }
     });
     const text = await generate(prompt, state.keys.openRouter, { maxTokens: 1300 });
     box.innerHTML = `<div class="note">${markdownToHtml(text)}</div>

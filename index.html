@@ -107,8 +107,8 @@
               </svg>
               <p class="t-sm muted" style="max-width: 42ch">
                 Themes are read from the last seven days of headlines, grouped by
-                sector. Needs a NewsAPI key for the headlines and an OpenRouter key
-                to name the themes.
+                sector. Needs a news key (newsdata.io works on the deployed page)
+                and an OpenRouter key to name the themes.
               </p>
             </div>
           </div>
@@ -157,12 +157,18 @@
                   </div>
                 </div>
                 <p class="t-xs muted" style="margin-top: 0.5rem">
-                  Metric filters apply to names whose data has been loaded. Load
-                  metrics for the visible page first — free API tiers do not allow
-                  fetching the whole index at once.
+                  Metric filters apply to names whose data has been loaded, so load
+                  metrics first — free API tiers do not allow fetching the whole
+                  index at once.
                 </p>
-                <button class="btn btn--sm" id="btn-load-metrics" style="margin-top: 0.5rem">Load metrics for visible</button>
               </details>
+
+              <!-- Loading metrics is the primary action on this panel, so it sits
+                   in the open, not folded inside the filter drawer. -->
+              <div class="row wrap" style="gap: 0.5rem">
+                <button class="btn btn--primary btn--sm" id="btn-load-metrics">Load metrics for visible</button>
+                <span class="t-xs muted">8 names per minute on the free tier</span>
+              </div>
             </div>
 
             <div class="table-wrap">

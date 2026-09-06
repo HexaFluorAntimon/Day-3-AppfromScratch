@@ -368,3 +368,112 @@ export function portfolioRiskStats({ returns, symbols, weights, cov, marketRetur
     observations: series.length
   };
 }
+
+/* --------------------------------------------------- tail and structure --- */
+
+/**
+ * Historical Value at Risk and Expected Shortfall from the realised return
+ * distribution — no normality assumed, because equity returns are not normal
+ * and a parametric VaR flatters the tail precisely where it matters.
+ *
+ * `confidence` 0.95 answers: on the worst 1 day in 20, how much is lost?
+ * Expected shortfall answers the sharper question: on those days, how much on
+ * average? Both are returned as fractions and as money.
+ */
+export function tailRisk(dailyReturns, portfolioValue, confidence = 0.95) {
+  const sorted = dailyReturns.filter(Number.isFinite).slice().sort((a, b) => a - b);
+  if (sorted.length < 30) return null;
+
+  const idx = Math.max(0, Math.floor((1 - confidence) * sorted.length) - 1);
+  const varFrac = sorted[idx];
+  const tail = sorted.slice(0, idx + 1);
+  const esFrac = tail.reduce((a, b) => a + b, 0) / tail.length;
+
+  return {
+    confidence,
+    varPct: varFrac,
+    varMoney: varFrac * portfolioValue,
+    esPct: esFrac,
+    esMoney: esFrac * portfolioValue,
+    observations: sorted.length,
+    tailDays: tail.length
+  };
+}
+
+/**
+ * The diversification ratio: the weighted average of the parts' volatility
+ * divided by the volatility of the whole.
+ *
+ * 1.0 means the names move as one and the book is a single bet wearing eight
+ * names; higher means correlation is genuinely working for you. `independentBets`
+ * squares it — the effective number of uncorrelated positions actually held,
+ * which is usually a good deal smaller than the position count.
+ */
+export function diversificationRatio(weights, cov) {
+  const vols = cov.map((row, i) => Math.sqrt(Math.max(0, row[i]) * TRADING_DAYS));
+  const weightedAvgVol = weights.reduce((a, w, i) => a + w * vols[i], 0);
+  const total = portfolioVol(weights, cov);
+  if (!(total > 0) || !Number.isFinite(weightedAvgVol)) return null;
+  const ratio = weightedAvgVol / total;
+  return {
+    ratio,
+    weightedAvgVol,
+    portfolioVol: total,
+    independentBets: ratio * ratio,
+    volSaved: weightedAvgVol - total
+  };
+}
+
+/**
+ * The most correlated pairs in the book. Two names at 0.85 are close to one
+ * position held twice — which is the kind of thing a weights table hides and a
+ * correlation matrix makes obvious.
+ */
+export function topCorrelatedPairs(correlation, symbols, limit = 5) {
+  const pairs = [];
+  for (let i = 0; i < symbols.length; i++) {
+    for (let j = i + 1; j < symbols.length; j++) {
+      const rho = correlation[i][j];
+      if (Number.isFinite(rho)) pairs.push({ a: symbols[i], b: symbols[j], rho });
+    }
+  }
+  return pairs.sort((x, y) => y.rho - x.rho).slice(0, limit);
+}
+
+/** Each name's average correlation to the rest of the book. */
+export function correlationToBook(correlation, symbols) {
+  return symbols.map((sym, i) => {
+    const others = correlation[i].filter((_, j) => j !== i).filter(Number.isFinite);
+    return { symbol: sym, avgRho: others.length ? others.reduce((a, b) => a + b, 0) / others.length : NaN };
+  });
+}
+
+/**
+ * The best and worst single sessions the current weights would have produced,
+ * with their dates. A number like "-4.1% on 2026-04-07" lands harder than an
+ * annualised volatility, because it is a day that actually happened.
+ */
+export function extremeDays(dailyReturns, dates, portfolioValue) {
+  if (!dailyReturns.length) return null;
+  // `dates` covers closes; returns start one session later.
+  const offset = Math.max(0, dates.length - dailyReturns.length);
+  let worst = { r: Infinity, i: -1 };
+  let best = { r: -Infinity, i: -1 };
+  dailyReturns.forEach((r, i) => {
+    if (!Number.isFinite(r)) return;
+    if (r < worst.r) worst = { r, i };
+    if (r > best.r) best = { r, i };
+  });
+  const at = (i) => dates[offset + i] ?? null;
+  return {
+    worst: { pct: worst.r, money: worst.r * portfolioValue, date: at(worst.i) },
+    best: { pct: best.r, money: best.r * portfolioValue, date: at(best.i) }
+  };
+}
+
+/** Share of sessions closing up — a plain read on consistency. */
+export function hitRate(dailyReturns) {
+  const valid = dailyReturns.filter(Number.isFinite);
+  if (!valid.length) return NaN;
+  return valid.filter((r) => r > 0).length / valid.length;
+}

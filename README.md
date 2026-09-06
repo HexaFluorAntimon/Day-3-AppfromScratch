@@ -95,6 +95,15 @@ ladder is offered between the ceiling and the stop.
   volatility and return, Sharpe, max drawdown, beta, and each position's share of
   total portfolio variance — the last of which is where the interesting news
   usually is.
+- **What a bad day costs.** Value at risk and expected shortfall (95%, one day)
+  in money, read from the realised distribution rather than a normal curve, and
+  anchored to the worst session that actually happened, with its date.
+- **Is the diversification real?** The diversification ratio — the weighted
+  volatility of the parts over the volatility of the whole — converted into the
+  **effective number of independent bets**, which is usually well below the
+  position count. Plus the most correlated pairs, because two names at 0.85 are
+  one bet held twice, and a full correlation matrix showing where the
+  diversification you think you have goes missing.
 
 ### The handles
 

@@ -151,7 +151,10 @@ export async function fetchQuotes(symbols, twelveKey) {
   if (!twelveKey || !symbols.length) return out;
 
   const unique = [...new Set(symbols.map((s) => s.toUpperCase()))];
-  const CHUNK = 20;
+  // Twelve Data bills a comma-separated quote request ONE CREDIT PER SYMBOL, not
+  // one per request — so a 20-symbol batch costs 20 of the free tier's 8 credits
+  // a minute and returns 429. Eight per request is the most the plan allows.
+  const CHUNK = 8;
 
   for (let i = 0; i < unique.length; i += CHUNK) {
     const chunk = unique.slice(i, i + CHUNK);
