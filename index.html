@@ -42,6 +42,7 @@
       <div class="tabs" role="tablist" aria-label="Sections">
         <button class="tab" id="tab-screener" role="tab" aria-selected="true" aria-controls="view-screener">Screener</button>
         <button class="tab" id="tab-portfolio" role="tab" aria-selected="false" aria-controls="view-portfolio">Portfolio</button>
+        <button class="tab" id="tab-thesis" role="tab" aria-selected="false" aria-controls="view-thesis">Thesis</button>
       </div>
 
       <div class="row" style="gap: 0.45rem">
@@ -361,6 +362,49 @@ XOM,60,104.25</pre>
 
         <!-- PORTFOLIO BODY -->
         <div id="portfolio-body" hidden></div>
+      </div>
+    </section>
+
+    <!-- ==================================================== THESIS VIEW -->
+    <!-- The committee dashboard: a fixed thesis portfolio rather than an
+         imported one. Prices load on open, weights come from the optimiser, and
+         the commentary is written by the model from the computed figures. -->
+    <section class="view" id="view-thesis" role="tabpanel" aria-labelledby="tab-thesis" hidden>
+      <div class="stack-lg">
+
+        <div class="hero">
+          <svg class="hero__art" viewBox="0 0 560 250" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+            <circle cx="330" cy="118" r="96" fill="#2f7d4f" />
+            <rect x="300" y="30" width="112" height="112" rx="2" fill="#14352a" />
+            <path d="M 248 -30 L 278 -38 L 352 284 L 318 292 Z" fill="#e7efe3" />
+            <path d="M 496 84 A 52 52 0 0 0 444 136 L 496 136 Z" fill="#d08b1f" />
+            <g fill="#bcd4bd">
+              <circle cx="462" cy="42" r="8" />
+              <circle cx="492" cy="42" r="8" />
+              <circle cx="522" cy="42" r="8" />
+              <circle cx="462" cy="200" r="8" />
+              <circle cx="492" cy="200" r="8" />
+            </g>
+          </svg>
+          <div class="hero__body">
+            <p class="eyebrow">Plate XII &middot; The mandate</p>
+            <h1 style="font-size: var(--t-display); letter-spacing: -0.03em; max-width: 20ch; margin: 0.3rem 0 0.5rem">
+              One thesis.<br />One million dollars.
+            </h1>
+            <p class="soft" style="max-width: 48ch">
+              Quality at a reasonable price, with momentum confirmation. The screen
+              runs on load, the risk model sizes what survives it, and every figure
+              below is recomputed in your browser.
+            </p>
+            <div class="row wrap" style="gap: 0.45rem; margin-top: 0.9rem">
+              <button class="btn btn--primary" id="btn-thesis-run">Run the screen</button>
+              <button class="btn btn--sm" id="btn-thesis-note">Write the executive commentary</button>
+              <span class="tag tag--neutral" id="thesis-badge">Not run yet</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="thesis-body"></div>
       </div>
     </section>
   </main>

@@ -1,12 +1,14 @@
-# Aura III — Screener & Portfolio
+# Aura III — Screener, Portfolio & Thesis
 
-A two-tab single-page application, built from scratch.
+A three-tab single-page application, built from scratch.
 
 **Screener** filters the S&P 500 by sector and by what the numbers say, reads what
 the news is actually discussing, and turns a selected name into an entry ceiling
 and a share count — with the arithmetic shown. **Portfolio** imports a CSV or
 Excel export of your holdings, prices it live, and offers eight rebalancing
-objectives that each return the exact trades and what they change.
+objectives that each return the exact trades and what they change. **Thesis**
+runs one quantitative investment thesis end to end — screen, selection, sizing
+and a $1M allocation — as the dashboard behind an investment-committee pitch.
 
 Built for **Generative AI in Finance**, Executive Academy WU — Day 3 repository.
 
@@ -160,6 +162,69 @@ before/after volatility, return, concentration and turnover. A handle whose inpu
 are missing refuses and says which key it needs — *Income tilt* does not run on
 assumed yields.
 
+## Tab 3 — Thesis
+
+The committee dashboard. One thesis, run end to end, with prices fetched when the
+tab opens.
+
+**Quality at a Reasonable Price, with momentum confirmation (QARP-M).** Two things
+are persistently rewarded in US large caps and are only weakly correlated with
+each other: paying below your sector for above-average profitability, and not
+standing in front of a downtrend. Value alone buys falling knives; momentum alone
+buys crowded trades.
+
+Eight mechanical gates, in `src/thesis.js`:
+
+| Sleeve | Gate |
+|---|---|
+| Quality | ROE ≥ 12%, net margin ≥ 8%, debt/equity ≤ 2.5 |
+| Price | trailing P/E ≤ 1.25× the **sector** median — never the market median |
+| Momentum | last close ≥ the 50-day average, 3-month return ≥ −2% |
+| Risk | annualised volatility ≤ 45%, beta ≤ 1.5 |
+
+Each gate returns pass, fail, or **not evaluable**. The third value is the one
+that matters: a name whose profitability is unknown is not a quality name, it is
+an unknown one, so a missing input never counts as a pass. Survivors are ranked
+by a composite z-score weighted 40% quality / 35% value / 25% momentum.
+
+### Selection and sizing are separate decisions
+
+This is the part worth reading. Run minimum variance or maximum Sharpe over the
+selected names and either will hand back a **corner solution** — a handful of
+names at the cap and the rest at exactly zero. That is the true optimum of the
+stated objective and a bad portfolio: it claims the covariance matrix is known
+precisely enough to discard names the thesis selected, from one sample window.
+
+So the app splits the decision. The screen decides *what* is held; the optimiser
+decides *how much*, inside a 2%–12% band. Then a tilt reconciles the two, because
+pure minimum variance sizes by how quietly a name trades and would put the three
+top-ranked names on the floor while staples and utilities take the cap:
+
+    wᵢ ∝ w_riskᵢ · exp(λ · scoreᵢ)
+
+λ = 0 leaves the optimiser untouched. The multiplicative form scales the
+optimiser's answer rather than replacing it. All four sizings — equal weight,
+minimum variance, maximum Sharpe, and minimum variance with the tilt — are shown
+side by side with vol, return, Sharpe, drawdown, beta, independent bets, VaR, and
+how many names each wanted to zero. **Equal weight is in the table on purpose:**
+it is the benchmark the other three have to beat to have earned their complexity,
+and on some windows it wins. That is reported, not hidden.
+
+The mandate is $1,000,000 in whole shares, so the residual is cash and the app
+names it. Ochre marks any position supplying materially more risk than capital.
+
+### Reproducing the figures
+
+```bash
+node scripts/run-thesis.mjs          # human-readable
+node scripts/run-thesis.mjs --json   # machine-readable
+```
+
+The script runs the same modules the browser runs, against the same deterministic
+archive, so the written coursework deliverables quote generated output rather
+than numbers typed by hand. Change a threshold in `PARAMS` and the documents'
+figures change with it.
+
 ## Running it
 
 ```bash
@@ -230,6 +295,8 @@ src/portfolio.js    CSV parsing, column mapping, valuation, the risk model
 src/optimize.js     the simplex projection, the eight handles, trade generation
 src/llm.js          OpenRouter prompts and markdown rendering
 src/themes.js       sector headlines and proxy-ETF moves
+src/thesis.js       the thesis: gates, ranking, selection, the weight band, the tilt
+scripts/run-thesis.mjs  runs the thesis in Node so the documents quote real output
 ```
 
 Asset paths are relative and `vite.config.js` sets `base: './'` — this is what

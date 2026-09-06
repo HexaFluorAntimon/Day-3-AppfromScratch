@@ -174,7 +174,15 @@ a:hover { color: var(--green-85); }
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.scroll-x { overflow-x: auto; }
+/* A grid or flex item will not shrink below its content's min-content width
+   unless it is told it may, so a wide table propagates its width up through
+   every ancestor and the whole page scrolls sideways instead of the table.
+   `overflow-x: auto` alone cannot fix that — the scroller has to be allowed to
+   be narrower than its own contents first. */
+.scroll-x { overflow-x: auto; min-width: 0; }
+.stack > *, .stack-lg > *,
+.grid-2 > *, .grid-3 > *, .grid-4 > *, .grid-side > * { min-width: 0; }
+.card, .section-head, .section-head > * { min-width: 0; }
 
 /* ---------------------------------------------------------------- cards --- */
 
@@ -207,6 +215,9 @@ a:hover { color: var(--green-85); }
 .section-head {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 0.75rem; margin-bottom: 0.85rem;
+  /* A heading and its status chips cannot share one line on a phone; without
+     this the chips push the card wider than the screen. */
+  flex-wrap: wrap;
 }
 
 .eyebrow {
@@ -720,3 +731,59 @@ td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-
 #screener-body tr { transition: background 0.12s ease; }
 #screener-body tr:hover td { background: var(--green-05); }
 #screener-body tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--green-60); }
+
+/* =============================================================== thesis tab === */
+
+/* Sector allocation as a bar list. A stacked bar would compress the tail into
+   slivers; one row per sector keeps the small exposures readable, which is
+   where a concentration problem usually hides. */
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.22rem 0;
+}
+.bar-row__label { color: var(--ink-soft); }
+.bar-row__track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--creme-deep);
+  overflow: hidden;
+}
+.bar-row__fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--green-60);
+}
+.bar-row__value { text-align: right; color: var(--ink-soft); }
+
+/* One card per holding: enough to read the trend state at a glance without
+   opening anything. */
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.6rem;
+}
+.signal-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: var(--creme);
+}
+.signal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-top: 0.28rem;
+}
+
+/* The accent is reserved for meaning, not decoration: here, a position
+   supplying more risk than its capital share. */
+.is-accent { color: var(--ochre-ink); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .bar-row { grid-template-columns: minmax(0, 110px) minmax(0, 1fr) 46px; gap: 0.45rem; }
+}

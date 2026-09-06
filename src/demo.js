@@ -61,6 +61,40 @@ export const DEMO_NAMES = [
   { symbol: 'AMT',  last: 194.6,  beta: 0.76, idio: 0.014, drift: 0.02, pe: 32.5, eps: 5.99, yield: 0.0338, target: 220, cap: 9.10e10, margin: 0.121, roe: 0.28, de: 3.62 },
   { symbol: 'LIN',  last: 442.8,  beta: 0.86, idio: 0.011, drift: 0.10, pe: 32.9, eps: 13.46, yield: 0.0132, target: 490, cap: 2.11e11, margin: 0.196, roe: 0.17, de: 0.51 },
   { symbol: 'GOOGL', last: 172.9, beta: 1.06, idio: 0.014, drift: 0.15, pe: 23.4, eps: 7.39, yield: 0.0046, target: 205, cap: 2.10e12, margin: 0.286, roe: 0.31, de: 0.09 },
+
+  // The pool widens from here. A screen is only as good as the list it runs
+  // over: with twenty candidates a selective thesis cannot fill a twenty-name
+  // book, so the offline archive carries enough names for the screen to reject
+  // most of them and still leave a portfolio. `eps` is `last / pe` in every row,
+  // so the justified-multiple anchor stays internally consistent.
+  { symbol: 'ORCL', last: 168.4,  beta: 1.12, idio: 0.016, drift: 0.19,  pe: 29.8, eps: 5.65,  yield: 0.0095, target: 195, cap: 4.68e11, margin: 0.192, roe: 0.62, de: 4.85 },
+  { symbol: 'CSCO', last: 58.7,   beta: 0.84, idio: 0.011, drift: 0.07,  pe: 19.4, eps: 3.03,  yield: 0.0272, target: 66,  cap: 2.34e11, margin: 0.221, roe: 0.22, de: 0.62 },
+  { symbol: 'TXN',  last: 196.3,  beta: 1.04, idio: 0.014, drift: 0.09,  pe: 32.6, eps: 6.02,  yield: 0.0278, target: 215, cap: 1.79e11, margin: 0.308, roe: 0.29, de: 0.79 },
+  { symbol: 'ACN',  last: 342.6,  beta: 1.09, idio: 0.013, drift: 0.06,  pe: 26.1, eps: 13.13, yield: 0.0161, target: 375, cap: 2.14e11, margin: 0.114, roe: 0.27, de: 0.18 },
+  { symbol: 'ABBV', last: 196.8,  beta: 0.61, idio: 0.013, drift: 0.13,  pe: 21.4, eps: 9.20,  yield: 0.0332, target: 218, cap: 3.48e11, margin: 0.108, roe: 0.68, de: 6.42 },
+  { symbol: 'MRK',  last: 98.4,   beta: 0.52, idio: 0.012, drift: 0.02,  pe: 16.8, eps: 5.86,  yield: 0.0329, target: 118, cap: 2.49e11, margin: 0.253, roe: 0.41, de: 0.72 },
+  { symbol: 'ABT',  last: 118.2,  beta: 0.71, idio: 0.010, drift: 0.10,  pe: 24.1, eps: 4.90,  yield: 0.0188, target: 132, cap: 2.05e11, margin: 0.161, roe: 0.18, de: 0.31 },
+  { symbol: 'MA',   last: 512.4,  beta: 0.96, idio: 0.011, drift: 0.14,  pe: 34.8, eps: 14.72, yield: 0.0055, target: 570, cap: 4.71e11, margin: 0.451, roe: 1.82, de: 2.42 },
+  { symbol: 'WFC',  last: 71.8,   beta: 1.18, idio: 0.014, drift: 0.12,  pe: 13.4, eps: 5.36,  yield: 0.0223, target: 82,  cap: 2.42e11, margin: 0.242, roe: 0.11, de: 1.21 },
+  { symbol: 'GS',   last: 548.2,  beta: 1.32, idio: 0.016, drift: 0.16,  pe: 14.6, eps: 37.55, yield: 0.0217, target: 610, cap: 1.71e11, margin: 0.221, roe: 0.13, de: 5.84 },
+  { symbol: 'AMZN', last: 218.6,  beta: 1.21, idio: 0.017, drift: 0.17,  pe: 36.4, eps: 6.01,  yield: 0.0,    target: 255, cap: 2.29e12, margin: 0.092, roe: 0.24, de: 0.54 },
+  { symbol: 'HD',   last: 398.5,  beta: 1.02, idio: 0.013, drift: 0.06,  pe: 25.8, eps: 15.45, yield: 0.0227, target: 430, cap: 3.96e11, margin: 0.094, roe: 4.12, de: 9.85 },
+  { symbol: 'MCD',  last: 296.7,  beta: 0.62, idio: 0.009, drift: 0.05,  pe: 24.9, eps: 11.92, yield: 0.0238, target: 320, cap: 2.13e11, margin: 0.317, roe: null, de: null },
+  { symbol: 'TJX',  last: 121.4,  beta: 0.88, idio: 0.012, drift: 0.15,  pe: 27.2, eps: 4.46,  yield: 0.0124, target: 138, cap: 1.36e11, margin: 0.086, roe: 0.61, de: 1.14 },
+  { symbol: 'META', last: 582.3,  beta: 1.24, idio: 0.019, drift: 0.22,  pe: 26.1, eps: 22.31, yield: 0.0034, target: 660, cap: 1.47e12, margin: 0.358, roe: 0.36, de: 0.28 },
+  { symbol: 'GE',   last: 188.9,  beta: 1.16, idio: 0.017, drift: 0.20,  pe: 34.2, eps: 5.52,  yield: 0.0061, target: 210, cap: 2.05e11, margin: 0.164, roe: 0.29, de: 0.78 },
+  { symbol: 'RTX',  last: 121.6,  beta: 0.79, idio: 0.011, drift: 0.14,  pe: 22.8, eps: 5.33,  yield: 0.0207, target: 135, cap: 1.62e11, margin: 0.078, roe: 0.11, de: 0.71 },
+  { symbol: 'UNP',  last: 232.4,  beta: 0.94, idio: 0.011, drift: 0.03,  pe: 21.2, eps: 10.96, yield: 0.0229, target: 258, cap: 1.41e11, margin: 0.276, roe: 0.42, de: 1.94 },
+  { symbol: 'DE',   last: 421.8,  beta: 1.06, idio: 0.014, drift: 0.08,  pe: 16.4, eps: 25.72, yield: 0.0148, target: 460, cap: 1.15e11, margin: 0.147, roe: 0.32, de: 2.68 },
+  { symbol: 'WMT',  last: 88.6,   beta: 0.54, idio: 0.010, drift: 0.18,  pe: 30.2, eps: 2.93,  yield: 0.0094, target: 98,  cap: 7.12e11, margin: 0.028, roe: 0.22, de: 0.72 },
+  { symbol: 'COST', last: 912.4,  beta: 0.79, idio: 0.012, drift: 0.16,  pe: 51.8, eps: 17.61, yield: 0.0051, target: 990, cap: 4.05e11, margin: 0.029, roe: 0.31, de: 0.32 },
+  { symbol: 'PEP',  last: 152.8,  beta: 0.48, idio: 0.009, drift: -0.02, pe: 21.6, eps: 7.07,  yield: 0.0354, target: 172, cap: 2.10e11, margin: 0.098, roe: 0.49, de: 2.14 },
+  { symbol: 'COP',  last: 98.7,   beta: 0.92, idio: 0.016, drift: 0.03,  pe: 12.4, eps: 7.96,  yield: 0.0316, target: 118, cap: 1.13e11, margin: 0.129, roe: 0.16, de: 0.36 },
+  { symbol: 'SO',   last: 88.2,   beta: 0.44, idio: 0.010, drift: 0.11,  pe: 21.8, eps: 4.05,  yield: 0.0328, target: 95,  cap: 9.64e10, margin: 0.181, roe: 0.13, de: 1.86 },
+  { symbol: 'PLD',  last: 112.4,  beta: 1.08, idio: 0.015, drift: -0.06, pe: 35.4, eps: 3.18,  yield: 0.0354, target: 132, cap: 1.04e11, margin: 0.301, roe: 0.06, de: 0.62 },
+  { symbol: 'APD',  last: 312.6,  beta: 0.82, idio: 0.012, drift: 0.09,  pe: 24.8, eps: 12.61, yield: 0.0231, target: 340, cap: 6.96e10, margin: 0.201, roe: 0.16, de: 0.71 },
+  { symbol: 'SHW',  last: 368.4,  beta: 1.02, idio: 0.013, drift: 0.07,  pe: 33.6, eps: 10.96, yield: 0.0078, target: 400, cap: 9.28e10, margin: 0.114, roe: 0.68, de: 3.12 },
+
   // The market proxy itself: beta 1 and no idiosyncratic noise, so every other
   // name's beta is measured against the same factor that generated it.
   { symbol: 'SPY',  last: 571.3,  beta: 1.00, idio: 0.0,   drift: 0.11, pe: 26.4, eps: 21.64, yield: 0.0121, target: null, cap: null, margin: null, roe: null, de: null }

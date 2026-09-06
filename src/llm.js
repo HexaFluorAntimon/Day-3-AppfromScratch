@@ -267,6 +267,124 @@ are no headlines, say so and stop.
 Return markdown bullets only, no preamble.`;
 }
 
+/**
+ * The investment-committee commentary.
+ *
+ * The committee is being asked for a million dollars, so the prompt is built to
+ * make the awkward things unavoidable: the rejected names go in, the sizing
+ * comparison goes in including the case where the naive benchmark wins, and the
+ * model is asked for the strongest argument against its own book. A commentary
+ * that recites only the flattering figures is the one an experienced committee
+ * discounts immediately.
+ */
+export function buildThesisPrompt({
+  thesis, params, method, counts, loaded, pool, holdings, rejected, stats, comparison, pairs, synthetic
+}) {
+  const holdingLines = holdings
+    .filter((h) => h.weight !== null)
+    .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+    .map(
+      (h) =>
+        `- ${h.symbol} (${h.sector ?? 'sector unavailable'}), screen rank ${h.rank ?? 'n/a'}: ` +
+        `${pct(h.weight)} of the book, $${Math.round(h.value ?? 0)}, ` +
+        `risk share ${pct(h.riskShare)}, P/E ${fmt(h.pe, 1)} ` +
+        `(${h.relativePe === null ? 'sector comparison unavailable' : `${fmt(h.relativePe, 2)}x sector median`}), ` +
+        `ROE ${pct(h.roe, 0)}, 3-month ${pct(h.mom3m, 1)}`
+    )
+    .join('\n');
+
+  // Grouped by reason, because "eight names failed on leverage" is a statement
+  // about the screen while "AMT failed on leverage" is one about a single name.
+  const byReason = new Map();
+  for (const r of rejected) {
+    for (const reason of r.reasons.length ? r.reasons : ['no data']) {
+      if (!byReason.has(reason)) byReason.set(reason, []);
+      byReason.get(reason).push(r.symbol);
+    }
+  }
+  const rejectLines = [...byReason.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([reason, syms]) => `- ${reason}: ${syms.length} name(s) — ${syms.join(', ')}`)
+    .join('\n');
+
+  const comparisonLines = comparison
+    .map(
+      (c) =>
+        `- ${c.method}: vol ${pct(c.vol)}, trailing return ${pct(c.ret)}, Sharpe ${fmt(c.sharpe)}` +
+        `${c.zeroed ? `, wanted to zero ${c.zeroed} of the selected names before the floor was applied` : ''}` +
+        `${c.method === method ? '  <-- the book being pitched' : ''}`
+    )
+    .join('\n');
+
+  const provenance = synthetic
+    ? `
+PROVENANCE — IMPORTANT
+Some or all of these figures were computed from a clearly-labelled SYNTHETIC
+archive, not live market data. The arithmetic is real; the inputs are generated.
+Say so in one short sentence at the end, and do not present any figure as a
+current market fact.`
+    : '';
+
+  return `DATA — thesis portfolio
+
+THESIS
+${thesis.name} (${thesis.short}).
+${thesis.claim}
+
+CONSTRUCTION
+- Candidate pool screened: ${loaded} of ${pool} names
+- Gates passed by ${counts.pass}, failed by ${counts.fail}, not evaluable for ${counts.incomplete}
+- Ranking: composite z-score weighted ${Object.entries(thesis.sleeveWeights).map(([k, v]) => `${(v * 100).toFixed(0)}% ${k}`).join(' / ')}
+- Sizing method used: ${method}
+- Position band: floor ${pct(params.minWeight, 0)}, cap ${pct(params.maxWeight, 0)}
+- Mandate: $${params.capital.toLocaleString('en-US')}, of which $${Math.round(stats.invested)} invested and $${Math.round(stats.cash)} residual cash (whole shares only)
+
+PORTFOLIO RISK (from the realised return distribution)
+- Annualised volatility: ${pct(stats.vol)}
+- Annualised trailing return: ${pct(stats.ret)}
+- Sharpe: ${fmt(stats.sharpe)}
+- Max drawdown in the window: ${pct(stats.maxDrawdown)}
+- Beta to the S&P 500 proxy: ${fmt(stats.beta)}
+- Effective independent bets: ${fmt(stats.independentBets, 1)} out of ${holdings.length} positions
+- Value at risk, 95% one-day: ${stats.varMoney === null ? 'unavailable' : `$${Math.abs(Math.round(stats.varMoney))}`}
+- Expected shortfall on those days: ${stats.esMoney === null ? 'unavailable' : `$${Math.abs(Math.round(stats.esMoney))}`}
+- Most correlated pairs: ${pairs.length ? pairs.map((p) => `${p.a}/${p.b} ${p.rho.toFixed(2)}`).join(', ') : 'unavailable'}
+
+HOLDINGS
+${holdingLines || '- none priced'}
+
+WHY THE REST WERE REJECTED
+${rejectLines || '- nothing was rejected'}
+
+SIZING METHODS COMPARED, SAME NAMES
+${comparisonLines}
+${provenance}
+
+TASK
+Write at most 450 words for an investment committee deciding on a $${(params.capital / 1e6).toFixed(0)}M allocation, in this shape:
+
+## The case
+What the thesis is, and what the screen actually did to the pool. Use the
+pass/fail counts. One paragraph.
+
+## The book
+The shape of the portfolio: what it is concentrated in, and whether risk share
+tracks capital weight or diverges from it. Name the specific positions where it
+diverges.
+
+## What a bad day costs
+Value at risk and expected shortfall in money against the mandate size, and the
+independent-bet count read against the position count.
+
+## The strongest objection
+The single best argument against this portfolio, drawn from the figures above —
+including the sizing comparison. If a simpler method scored better on this
+window, say so plainly. Do not soften it.
+
+## What would change our mind
+The specific, observable condition that would falsify the thesis.`;
+}
+
 export async function generate(prompt, apiKey, options) {
   if (!apiKey) throw new Error('No OpenRouter key — add one to generate the written note.');
   return callOpenRouter(prompt, apiKey, options);

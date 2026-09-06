@@ -17,8 +17,12 @@ import {
   tailRisk, diversificationRatio, topCorrelatedPairs, correlationToBook,
   extremeDays, hitRate
 } from './src/portfolio.js';
-import { HANDLES, tradesFor, meanDailyReturns, annualisedFor, volFor } from './src/optimize.js';
-import { buildStockPrompt, buildPortfolioPrompt, buildThemePrompt, generate, markdownToHtml } from './src/llm.js';
+import { HANDLES, tradesFor, meanDailyReturns, annualisedFor, volFor, minVariance, maxSharpe } from './src/optimize.js';
+import {
+  THESIS, PARAMS, GATES, CORE_UNIVERSE, CANDIDATE_POOL, HEADLINE_METHOD,
+  screenPool, selectBook, sizeBook, allocate, signalSummary
+} from './src/thesis.js';
+import { buildStockPrompt, buildPortfolioPrompt, buildThemePrompt, buildThesisPrompt, generate, markdownToHtml } from './src/llm.js';
 import { fetchSectorHeadlines, fetchSectorMoves, coverageRanking } from './src/themes.js';
 import {
   DEMO_SYMBOLS, DEMO_PORTFOLIO, isDemoSymbol, demoBars, demoQuotes,
@@ -59,7 +63,11 @@ const state = {
   holdings: [],
   valued: null,
   risk: null,
-  activeHandle: null
+  activeHandle: null,
+  // thesis tab
+  thesis: null,
+  thesisMethod: HEADLINE_METHOD,
+  thesisRan: false
 };
 
 const el = (id) => document.getElementById(id);
@@ -169,14 +177,26 @@ function closeModal() {
 
 /* ------------------------------------------------------------------ tabs --- */
 
+const VIEWS = ['screener', 'portfolio', 'thesis'];
+
+function viewFromHash() {
+  const name = String(location.hash || '').replace('#', '');
+  return VIEWS.includes(name) ? name : 'screener';
+}
+
 function setView(view) {
-  const isScreener = view !== 'portfolio';
-  el('view-screener').hidden = !isScreener;
-  el('view-portfolio').hidden = isScreener;
-  el('tab-screener').setAttribute('aria-selected', String(isScreener));
-  el('tab-portfolio').setAttribute('aria-selected', String(!isScreener));
-  const hash = isScreener ? '#screener' : '#portfolio';
+  const active = VIEWS.includes(view) ? view : 'screener';
+  for (const name of VIEWS) {
+    el(`view-${name}`).hidden = name !== active;
+    el(`tab-${name}`).setAttribute('aria-selected', String(name === active));
+  }
+  const hash = `#${active}`;
   if (location.hash !== hash) history.replaceState(null, '', hash);
+
+  // Opening the thesis tab is the request to run it — a committee dashboard that
+  // waits to be told to fetch is a dashboard nobody reads. It runs once; the
+  // button re-runs it.
+  if (active === 'thesis' && !state.thesisRan) runThesis();
 }
 
 /* ------------------------------------------------------------ data routing --- */
@@ -1620,6 +1640,644 @@ async function writePortfolioNote() {
 
 /* ------------------------------------------------------------- bootstrap --- */
 
+/* =============================================================== thesis tab === */
+
+/**
+ * Run the whole thesis: load what the gates need, screen the pool, select the
+ * book, size it three ways, and allocate the mandate.
+ *
+ * The expensive part is history — every momentum and risk gate needs bars, and
+ * Twelve Data's free tier bills one credit per symbol at eight per minute. So
+ * the loop is sequential with a visible counter and it stops on the first
+ * failure rather than hammering a rate limit. Whatever loaded is what the screen
+ * runs on, and the header says how many that was: a partial screen reported
+ * honestly beats a complete screen built on substituted numbers.
+ */
+async function runThesis() {
+  state.thesisRan = true;
+  const btn = el('btn-thesis-run');
+  const body = el('thesis-body');
+  btn.disabled = true;
+
+  const pool = CANDIDATE_POOL;
+  const loaded = [];
+  const failures = [];
+
+  const paint = (n) => {
+    body.innerHTML = `<div class="card plate card-pad"><div class="loading"><div class="spinner"></div>
+      <p class="loading__text">Screening ${n}/${pool.length} candidates</p></div></div>`;
+    btn.textContent = `Loading ${n}/${pool.length}`;
+  };
+  paint(0);
+
+  // The market proxy first: beta is a gate, so without it every candidate would
+  // report beta unknown and nothing would qualify.
+  if (!state.marketReturns) {
+    try {
+      const bars = await getBars(MARKET_PROXY, 400);
+      if (bars) {
+        state.bars.set(MARKET_PROXY, bars);
+        state.marketReturns = simpleReturns(bars.map((b) => b.close));
+      }
+    } catch (err) {
+      failures.push(`${MARKET_PROXY}: ${err.message}`);
+    }
+  }
+
+  if (!state.sectorPe) state.sectorPe = await getSectorPeMap();
+
+  for (const candidate of pool) {
+    const { symbol } = candidate;
+    try {
+      if (!state.bars.has(symbol)) {
+        const bars = await getBars(symbol, 400);
+        if (bars) state.bars.set(symbol, bars);
+      }
+      if (!state.fundamentals.has(symbol)) {
+        const f = await getFundamentals(symbol);
+        if (f) state.fundamentals.set(symbol, f);
+      }
+      loaded.push(candidate);
+      paint(loaded.length);
+    } catch (err) {
+      // A rate limit is the expected failure on a free tier, and it is terminal
+      // for this pass — continuing would just collect more of the same error.
+      failures.push(`${symbol}: ${err.message}`);
+      break;
+    }
+  }
+
+  const rows = loaded.map((c) => thesisRow(c));
+  const screen = screenPool(rows);
+  const book = selectBook(screen.passing);
+
+  let sized = null;
+  let risk = null;
+  let alloc = null;
+
+  if (book.holdings.length >= 2) {
+    const symbols = book.holdings.map((h) => h.symbol);
+    const aligned = alignReturns(state.bars, symbols, 60);
+    if (aligned.symbols.length >= 2) {
+      const cov = covarianceMatrix(aligned.returns, aligned.symbols);
+      const meanDaily = meanDailyReturns(aligned.returns, aligned.symbols);
+      const scoreBySymbol = new Map(book.holdings.map((h) => [h.symbol, h.score]));
+      const scores = aligned.symbols.map((s) => scoreBySymbol.get(s) ?? 0);
+
+      sized = sizeBook({ symbols: aligned.symbols, cov, meanDaily, scores, optimisers: { minVariance, maxSharpe } });
+      risk = { aligned, cov, meanDaily, correlation: correlationFromCov(cov) };
+
+      // Every method gets its statistics, so the comparison table is real rather
+      // than a claim about the one we picked.
+      for (const [label, sizing] of Object.entries(sized)) {
+        const w = sizing.weights;
+        const series = portfolioReturnSeries(aligned.returns, aligned.symbols, w);
+        sizing.stats = {
+          ...portfolioRiskStats({ returns: aligned.returns, symbols: aligned.symbols, weights: w, cov, marketReturns: state.marketReturns }),
+          vol: volFor(w, cov),
+          ret: annualisedFor(aligned.returns, aligned.symbols, w),
+          diversification: diversificationRatio(w, cov),
+          tail: tailRisk(series, PARAMS.capital, 0.95),
+          contributions: riskContributions(w, cov)
+        };
+      }
+
+      const method = sized[state.thesisMethod] ? state.thesisMethod : HEADLINE_METHOD;
+      state.thesisMethod = method;
+      const prices = new Map(book.holdings.map((h) => [h.symbol, h.price]));
+      alloc = allocate({ symbols: aligned.symbols, weights: sized[method].weights, prices });
+      risk.pairs = topCorrelatedPairs(risk.correlation, aligned.symbols, 5);
+    }
+  }
+
+  state.thesis = { screen, book, sized, risk, alloc, loaded: loaded.length, pool: pool.length, failures };
+
+  btn.disabled = false;
+  btn.textContent = 'Re-run the screen';
+  renderThesis();
+}
+
+/**
+ * One candidate row, assembled from whatever the app has loaded. Missing figures
+ * stay missing — the gates are built to say so rather than to guess.
+ */
+function thesisRow(candidate) {
+  const { symbol, sector } = candidate;
+  const f = state.fundamentals.get(symbol) ?? null;
+  const bars = state.bars.get(symbol) ?? null;
+  const m = bars ? priceMetrics(bars, state.marketReturns) : null;
+  if (m) state.metrics.set(symbol, m);
+
+  const sectorPe = state.sectorPe?.get?.(sector);
+
+  return {
+    symbol,
+    sector,
+    name: findCompany(state.universe.companies, symbol)?.name ?? symbol,
+    pe: f?.peTtm ?? NaN,
+    eps: f?.epsTtm ?? NaN,
+    roe: f?.roe ?? NaN,
+    margin: f?.netMargin ?? NaN,
+    debtEquity: f?.debtToEquity ?? NaN,
+    dividendYield: f?.dividendYield ?? NaN,
+    sectorPe: Number.isFinite(sectorPe) ? sectorPe : NaN,
+    price: m?.last ?? NaN,
+    sma50: m?.sma50 ?? NaN,
+    sma200: m?.sma200 ?? NaN,
+    mom3m: m?.ret3m ?? NaN,
+    vol: m?.vol ?? NaN,
+    beta: m?.beta ?? NaN,
+    atr: m?.atr14 ?? NaN,
+    high52: m?.high52 ?? NaN,
+    low52: m?.low52 ?? NaN
+  };
+}
+
+function renderThesis() {
+  const t = state.thesis;
+  const body = el('thesis-body');
+  if (!t) return;
+
+  const badge = el('thesis-badge');
+  badge.textContent = `${t.screen.counts.pass}/${t.loaded} qualify · ${t.book.holdings.length} held`;
+  badge.className = t.book.holdings.length >= PARAMS.minNames ? 'tag tag--up' : 'tag tag--accent';
+
+  body.innerHTML = [
+    renderThesisStatement(t),
+    renderThesisScreen(t),
+    t.sized ? renderThesisMethods(t) : renderThesisBlocked(t),
+    t.alloc ? renderThesisAllocation(t) : '',
+    t.risk ? renderThesisRisk(t) : '',
+    renderThesisSignals(t),
+    '<div id="thesis-note"></div>'
+  ].join('');
+
+  document.querySelectorAll('[data-method]').forEach((b) =>
+    b.addEventListener('click', () => {
+      state.thesisMethod = b.dataset.method;
+      const symbols = t.risk.aligned.symbols;
+      const prices = new Map(t.book.holdings.map((h) => [h.symbol, h.price]));
+      t.alloc = allocate({ symbols, weights: t.sized[state.thesisMethod].weights, prices });
+      renderThesis();
+    })
+  );
+}
+
+function renderThesisStatement(t) {
+  const gateRows = GATES.map(
+    (g) => `<tr><td class="mono t-xs">${esc(g.group)}</td><td>${esc(g.label)}</td><td class="mono t-xs">${esc(g.rule())}</td></tr>`
+  ).join('');
+
+  const partial =
+    t.loaded < t.pool
+      ? `<div class="callout callout--accent" style="margin-top:0.9rem">
+           <strong>Screened ${t.loaded} of ${t.pool} candidates.</strong> Loading stopped early —
+           ${esc(t.failures[t.failures.length - 1] ?? 'a data call failed')}.
+           The screen ran on what loaded; nothing was substituted for the rest.
+         </div>`
+      : '';
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XIII &middot; The thesis</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">${esc(THESIS.name)}</h2>
+        </div>
+        <span class="tag tag--neutral mono">${esc(THESIS.short)}</span>
+      </div>
+
+      <p class="soft" style="max-width:74ch;margin-top:0.5rem">${esc(THESIS.claim)}</p>
+
+      <div class="grid-3" style="gap:0.9rem;margin-top:1.1rem">
+        ${THESIS.why.map((w) => `<p class="t-sm soft">${esc(w)}</p>`).join('')}
+      </div>
+
+      <p class="eyebrow" style="margin-top:1.3rem;margin-bottom:0.4rem">The gates &mdash; every one mechanical</p>
+      <div class="scroll-x"><table>
+        <thead><tr><th>Sleeve</th><th>Test</th><th>Threshold</th></tr></thead>
+        <tbody>${gateRows}</tbody>
+      </table></div>
+
+      <p class="t-xs muted" style="margin-top:0.7rem">
+        A gate whose input is missing counts as <strong>not passed</strong>, never as passed.
+        Ranking is a composite z-score across the survivors, weighted
+        ${Object.entries(THESIS.sleeveWeights).map(([k, v]) => `${(v * 100).toFixed(0)}% ${k}`).join(' / ')}.
+      </p>
+      ${partial}
+    </div>`;
+}
+
+function renderThesisScreen(t) {
+  const rows = t.screen.all
+    .slice()
+    .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || a.symbol.localeCompare(b.symbol))
+    .map((r) => {
+      const held = t.book.holdings.some((h) => h.symbol === r.symbol);
+      const tone = r.verdict === 'pass' ? 'is-up' : r.verdict === 'incomplete' ? 'is-flat' : 'is-down';
+      const reason =
+        r.verdict === 'pass'
+          ? held ? 'held' : 'qualified, not selected'
+          : r.verdict === 'incomplete'
+            ? `no data: ${r.unknown.join(', ')}`
+            : r.failed.join(', ');
+      return `<tr${held ? ' class="is-selected"' : ''}>
+        <td class="mono">${r.rank ?? '—'}</td>
+        <td class="mono"><strong>${esc(r.symbol)}</strong></td>
+        <td class="t-xs">${esc(r.sector)}</td>
+        <td class="mono num">${num(r.pe, 1)}</td>
+        <td class="mono num">${Number.isFinite(r.pe / r.sectorPe) ? num(r.pe / r.sectorPe, 2) + '×' : DASH}</td>
+        <td class="mono num">${pct(r.roe, 0)}</td>
+        <td class="mono num">${pct(r.margin, 1)}</td>
+        <td class="mono num">${num(r.debtEquity, 2)}</td>
+        <td class="mono num ${signClass(r.mom3m)}">${pct(r.mom3m, 1)}</td>
+        <td class="mono num">${pct(r.vol, 1)}</td>
+        <td class="mono num">${num(r.beta, 2)}</td>
+        <td class="mono num">${num(r.score, 2)}</td>
+        <td class="t-xs ${tone}">${esc(reason)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XIV &middot; The screen</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">${t.screen.counts.pass} of ${t.loaded} qualify</h2>
+          <p class="t-sm soft" style="margin-top:0.3rem;max-width:66ch">
+            The rejections are the interesting column. A thesis that admits everything
+            is not a thesis, so every name is listed with the gate that stopped it.
+          </p>
+        </div>
+        <div class="row wrap" style="gap:0.4rem">
+          <span class="tag tag--up">${t.screen.counts.pass} pass</span>
+          <span class="tag tag--down">${t.screen.counts.fail} fail</span>
+          ${t.screen.counts.incomplete ? `<span class="tag tag--neutral">${t.screen.counts.incomplete} no data</span>` : ''}
+        </div>
+      </div>
+      <div class="scroll-x" style="margin-top:0.8rem"><table id="thesis-screen-table">
+        <thead><tr>
+          <th>#</th><th>Ticker</th><th>Sector</th><th class="num">P/E</th><th class="num">vs sector</th>
+          <th class="num">ROE</th><th class="num">Margin</th><th class="num">D/E</th>
+          <th class="num">3-month</th><th class="num">Vol</th><th class="num">Beta</th>
+          <th class="num">Score</th><th>Outcome</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${t.book.relaxations.length
+        ? `<div class="callout callout--accent" style="margin-top:0.9rem">
+             ${t.book.relaxations.map((r) => `<p class="t-sm">${esc(r)}</p>`).join('')}
+           </div>`
+        : ''}
+    </div>`;
+}
+
+function renderThesisMethods(t) {
+  const rows = Object.entries(t.sized)
+    .map(([label, s]) => {
+      const st = s.stats;
+      const active = label === state.thesisMethod;
+      return `<tr${active ? ' class="is-selected"' : ''}>
+        <td>${active ? '<strong>' : ''}${esc(label)}${active ? '</strong>' : ''}${label === HEADLINE_METHOD ? ' <span class="tag tag--accent t-xs">headline</span>' : ''}</td>
+        <td class="mono num">${pct(st.vol)}</td>
+        <td class="mono num ${signClass(st.ret)}">${pct(st.ret)}</td>
+        <td class="mono num">${num(st.sharpe)}</td>
+        <td class="mono num is-down">${pct(st.maxDrawdown)}</td>
+        <td class="mono num">${num(st.beta)}</td>
+        <td class="mono num">${num(st.diversification?.independentBets, 1)}</td>
+        <td class="mono num">${money0(st.tail?.varMoney)}</td>
+        <td class="mono num">${s.zeroed}</td>
+        <td><button class="chip" data-method="${esc(label)}" aria-pressed="${active}">${active ? 'showing' : 'show'}</button></td>
+      </tr>`;
+    })
+    .join('');
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XV &middot; Sizing</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">Four ways to weight the same names</h2>
+          <p class="t-sm soft" style="margin-top:0.3rem;max-width:70ch">
+            Selection and sizing are separate decisions. The screen chose the names;
+            these choose the amounts, each solved from scratch over the same
+            covariance matrix with a ${pct(PARAMS.maxWeight, 0)} cap and a
+            ${pct(PARAMS.minWeight, 0)} floor.
+          </p>
+        </div>
+      </div>
+      <div class="scroll-x" style="margin-top:0.8rem"><table id="thesis-method-table">
+        <thead><tr>
+          <th>Method</th><th class="num">Vol</th><th class="num">Return</th><th class="num">Sharpe</th>
+          <th class="num">Max DD</th><th class="num">Beta</th><th class="num">Indep. bets</th>
+          <th class="num">VaR 95%</th><th class="num">Zeroed</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="t-xs muted" style="margin-top:0.7rem">
+        <strong>Zeroed</strong> counts the selected names each optimiser wanted to hold at
+        nothing before the floor was applied. Minimum variance and maximum Sharpe both
+        want a corner solution here — the floor is what keeps the portfolio the thesis
+        selected. Equal weight is the benchmark the other three have to beat to have
+        earned their complexity.
+      </p>
+    </div>`;
+}
+
+function renderThesisBlocked(t) {
+  return `
+    <div class="card plate card-pad">
+      <p class="eyebrow">Plate XV &middot; Sizing</p>
+      <h2 style="font-size:var(--t-h1);margin-top:0.2rem">Not enough qualified names to optimise</h2>
+      <p class="t-sm soft" style="margin-top:0.4rem;max-width:64ch">
+        ${t.book.holdings.length} name${t.book.holdings.length === 1 ? '' : 's'} cleared the gates, and a
+        covariance matrix needs at least two with overlapping history. Add a Twelve Data
+        key, or turn the demo archive on, so the momentum and risk gates have prices to read.
+      </p>
+    </div>`;
+}
+
+function renderThesisAllocation(t) {
+  const a = t.alloc;
+  const s = t.sized[state.thesisMethod];
+  const symbols = t.risk.aligned.symbols;
+  const bySymbol = new Map(t.book.holdings.map((h) => [h.symbol, h]));
+
+  const rows = a.lines
+    .slice()
+    .sort((x, y) => (y.targetWeight ?? 0) - (x.targetWeight ?? 0))
+    .map((l) => {
+      const i = symbols.indexOf(l.symbol);
+      const h = bySymbol.get(l.symbol);
+      const riskShare = s.stats.contributions?.[i];
+      // Ochre marks a position supplying more risk than capital — the one place
+      // the accent colour is allowed to mean something.
+      const hot = Number.isFinite(riskShare) && Number.isFinite(l.actualWeight) && riskShare > l.actualWeight * 1.25;
+      return `<tr>
+        <td class="mono"><strong>${esc(l.symbol)}</strong></td>
+        <td class="t-xs">${esc(h?.sector ?? '')}</td>
+        <td class="mono num">${pct(l.targetWeight)}</td>
+        <td class="mono num">${money(l.price)}</td>
+        <td class="mono num">${l.shares === null ? DASH : l.shares.toLocaleString('en-US')}</td>
+        <td class="mono num">${money0(l.value)}</td>
+        <td class="mono num">${pct(l.actualWeight)}</td>
+        <td class="mono num${hot ? ' is-accent' : ''}">${pct(riskShare)}${hot ? ' ▲' : ''}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const sectors = new Map();
+  for (const l of a.lines) {
+    const sec = bySymbol.get(l.symbol)?.sector ?? 'Unknown';
+    sectors.set(sec, (sectors.get(sec) ?? 0) + (l.value ?? 0));
+  }
+  const sectorBars = [...sectors.entries()]
+    .sort((x, y) => y[1] - x[1])
+    .map(([sec, v]) => {
+      const share = a.invested ? v / a.invested : 0;
+      return `<div class="bar-row">
+        <span class="bar-row__label t-xs">${esc(sec)}</span>
+        <span class="bar-row__track"><span class="bar-row__fill" style="width:${(share * 100).toFixed(1)}%"></span></span>
+        <span class="bar-row__value mono t-xs">${pct(share)}</span>
+      </div>`;
+    })
+    .join('');
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XVI &middot; The allocation</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">${money0(PARAMS.capital)} deployed</h2>
+          <p class="t-sm soft" style="margin-top:0.3rem">
+            ${esc(state.thesisMethod)} &middot; whole shares only, so the residual is cash.
+          </p>
+        </div>
+        <div class="grid-3" style="gap:0.9rem;min-width:260px">
+          <div class="metric"><span class="metric__label">Invested</span><span class="metric__value">${money0(a.invested)}</span></div>
+          <div class="metric"><span class="metric__label">Cash</span><span class="metric__value">${money0(a.cash)}</span></div>
+          <div class="metric"><span class="metric__label">Names</span><span class="metric__value">${a.priced}</span></div>
+        </div>
+      </div>
+      <div class="scroll-x" style="margin-top:0.8rem"><table id="thesis-alloc-table">
+        <thead><tr>
+          <th>Ticker</th><th>Sector</th><th class="num">Target</th><th class="num">Price</th>
+          <th class="num">Shares</th><th class="num">Value</th><th class="num">Actual</th><th class="num">Risk share</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="eyebrow" style="margin-top:1.2rem;margin-bottom:0.5rem">By sector</p>
+      ${sectorBars}
+      <p class="t-xs muted" style="margin-top:0.8rem">
+        ▲ marks a position contributing materially more risk than capital. Risk share is
+        the position's share of total portfolio variance, which is the number that decides
+        what a bad day costs — not the weight.
+      </p>
+    </div>`;
+}
+
+function renderThesisRisk(t) {
+  const s = t.sized[state.thesisMethod];
+  const st = s.stats;
+  const d = st.diversification;
+  const tail = st.tail;
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XVII &middot; Risk</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">What it costs to be wrong</h2>
+        </div>
+        <span class="tag tag--neutral mono t-xs">${t.risk.aligned.returns[t.risk.aligned.symbols[0]]?.length ?? 0} overlapping sessions</span>
+      </div>
+
+      <div class="grid-4" style="margin-top:0.9rem">
+        <div class="metric"><span class="metric__label">Annualised vol</span><span class="metric__value">${pct(st.vol)}</span></div>
+        <div class="metric"><span class="metric__label">Annualised return</span><span class="metric__value ${signClass(st.ret)}">${pct(st.ret)}</span></div>
+        <div class="metric"><span class="metric__label">Sharpe</span><span class="metric__value">${num(st.sharpe)}</span></div>
+        <div class="metric"><span class="metric__label">Max drawdown</span><span class="metric__value is-down">${pct(st.maxDrawdown)}</span></div>
+        <div class="metric"><span class="metric__label">Beta to ${MARKET_PROXY}</span><span class="metric__value">${num(st.beta)}</span></div>
+      </div>
+
+      <div class="grid-2" style="gap:1.1rem;margin-top:1.2rem">
+        <div>
+          <p class="eyebrow" style="margin-bottom:0.4rem">A bad day, in money</p>
+          <p class="t-sm soft">
+            On the worst 5% of sessions in this window, a ${money0(PARAMS.capital)} book loses
+            <strong>${money0(Math.abs(tail?.varMoney ?? NaN))}</strong> or more. When that
+            happens, the average loss is <strong>${money0(Math.abs(tail?.esMoney ?? NaN))}</strong>.
+          </p>
+          <p class="t-xs muted" style="margin-top:0.4rem">
+            Read from the realised distribution, not a normal curve — the tail is where the
+            normal assumption is most wrong and it matters most.
+          </p>
+        </div>
+        <div>
+          <p class="eyebrow" style="margin-bottom:0.4rem">Is the diversification real?</p>
+          <p class="t-sm soft">
+            ${t.book.holdings.length} positions behave like
+            <strong>${num(d?.independentBets, 1)} independent bets</strong>
+            (diversification ratio ${num(d?.ratio)}). Everything above that number is
+            the same bet held more than once.
+          </p>
+          ${t.risk.pairs?.length
+            ? `<p class="t-xs muted" style="margin-top:0.4rem">Most correlated:
+                 ${t.risk.pairs.slice(0, 3).map((p) => `${esc(p.a)}/${esc(p.b)} ${num(p.rho)}`).join(' · ')}</p>`
+            : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderThesisSignals(t) {
+  if (!t.book.holdings.length) return '';
+  const cards = t.book.holdings
+    .map((h) => {
+      const signals = signalSummary(h);
+      if (!signals.length) return '';
+      return `<div class="signal-card">
+        <div class="row" style="justify-content:space-between;align-items:baseline">
+          <span class="mono"><strong>${esc(h.symbol)}</strong></span>
+          <span class="mono t-xs muted">${money(h.price)}</span>
+        </div>
+        ${signals
+          .map(
+            (s) => `<div class="signal-row">
+              <span class="t-xs muted">${esc(s.label)}</span>
+              <span class="mono t-xs is-${esc(s.tone)}">${esc(s.value)}</span>
+            </div>`
+          )
+          .join('')}
+      </div>`;
+    })
+    .join('');
+
+  return `
+    <div class="card plate card-pad">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Plate XVIII &middot; Signals</p>
+          <h2 style="font-size:var(--t-h1);margin-top:0.2rem">Where each holding stands</h2>
+          <p class="t-sm soft" style="margin-top:0.3rem;max-width:66ch">
+            State, not advice: distance from the two moving averages, position in the
+            52-week range, and the stop two average true ranges below the last close.
+          </p>
+        </div>
+      </div>
+      <div class="signal-grid" style="margin-top:0.9rem">${cards}</div>
+    </div>`;
+}
+
+/**
+ * The executive commentary. The model is handed the computed figures and asked
+ * to explain them; it is never asked for a number. Without a key the panel says
+ * what the key would add rather than pretending a model ran.
+ */
+async function writeThesisNote() {
+  const t = state.thesis;
+  const box = el('thesis-note');
+  if (!t || !box) return;
+  if (!t.sized) {
+    toast('Run the screen first — there is nothing to comment on yet.', 'accent');
+    return;
+  }
+  if (!state.keys.openRouter) {
+    box.innerHTML = `
+      <div class="card plate card-pad">
+        <p class="eyebrow">Plate XIX &middot; Executive commentary</p>
+        <h2 style="font-size:var(--t-h1);margin-top:0.2rem">This one needs a model</h2>
+        <p class="t-sm soft" style="margin-top:0.4rem;max-width:64ch">
+          Every figure above was computed here and is real. The commentary is the one
+          thing the archive does not fake: writing "AI-generated" prose with no model
+          call would be the single piece of invention that actually misleads. Add an
+          OpenRouter key and this panel explains the book in the committee's language.
+        </p>
+      </div>`;
+    return;
+  }
+
+  const s = t.sized[state.thesisMethod];
+  box.innerHTML = `<div class="card plate card-pad"><div class="loading"><div class="spinner"></div>
+    <p class="loading__text">Writing the commentary</p></div></div>`;
+
+  const symbols = t.risk.aligned.symbols;
+  const prompt = buildThesisPrompt({
+    thesis: THESIS,
+    params: PARAMS,
+    method: state.thesisMethod,
+    counts: t.screen.counts,
+    loaded: t.loaded,
+    pool: t.pool,
+    holdings: t.alloc.lines.map((l) => {
+      const i = symbols.indexOf(l.symbol);
+      const h = t.book.holdings.find((x) => x.symbol === l.symbol);
+      return {
+        symbol: l.symbol,
+        sector: h?.sector ?? null,
+        rank: h?.rank ?? null,
+        weight: l.actualWeight,
+        value: l.value,
+        riskShare: s.stats.contributions?.[i] ?? null,
+        pe: h?.pe ?? null,
+        relativePe: Number.isFinite(h?.pe / h?.sectorPe) ? h.pe / h.sectorPe : null,
+        roe: h?.roe ?? null,
+        mom3m: h?.mom3m ?? null
+      };
+    }),
+    rejected: t.screen.all
+      .filter((r) => r.verdict !== 'pass')
+      .map((r) => ({ symbol: r.symbol, sector: r.sector, reasons: r.failed.length ? r.failed : r.unknown })),
+    stats: {
+      vol: s.stats.vol,
+      ret: s.stats.ret,
+      sharpe: s.stats.sharpe,
+      maxDrawdown: s.stats.maxDrawdown,
+      beta: s.stats.beta,
+      independentBets: s.stats.diversification?.independentBets ?? null,
+      varMoney: s.stats.tail?.varMoney ?? null,
+      esMoney: s.stats.tail?.esMoney ?? null,
+      capital: PARAMS.capital,
+      invested: t.alloc.invested,
+      cash: t.alloc.cash
+    },
+    comparison: Object.entries(t.sized).map(([label, x]) => ({
+      method: label,
+      vol: x.stats.vol,
+      ret: x.stats.ret,
+      sharpe: x.stats.sharpe,
+      zeroed: x.zeroed
+    })),
+    pairs: t.risk.pairs ?? [],
+    synthetic: useDemo('twelve') || useDemo('fmp')
+  });
+
+  try {
+    const text = await generate(prompt, state.keys.openRouter);
+    box.innerHTML = `
+      <div class="card plate card-pad">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Plate XIX &middot; Executive commentary</p>
+            <h2 style="font-size:var(--t-h1);margin-top:0.2rem">The committee read</h2>
+          </div>
+          <span class="tag tag--neutral t-xs">written from the figures above</span>
+        </div>
+        <div class="note" style="margin-top:0.8rem">${markdownToHtml(text)}</div>
+        <p class="t-xs muted" style="margin-top:0.9rem">
+          The model received the computed figures and explained them. It calculated
+          nothing and was given no licence to add a number.
+        </p>
+      </div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="card plate card-pad">
+      <p class="eyebrow">Plate XIX &middot; Executive commentary</p>
+      <p class="t-sm is-down" style="margin-top:0.4rem">Commentary: ${esc(err.message)}</p>
+    </div>`;
+  }
+}
+
 async function bootstrapData() {
   renderTape();
 
@@ -1720,10 +2378,12 @@ function init() {
   if (state.demo && !state.keys.twelve) primeDemoMetrics();
   renderKeyStatus();
 
-  el('tab-screener').addEventListener('click', () => setView('screener'));
-  el('tab-portfolio').addEventListener('click', () => setView('portfolio'));
-  setView(location.hash === '#portfolio' ? 'portfolio' : 'screener');
-  window.addEventListener('hashchange', () => setView(location.hash === '#portfolio' ? 'portfolio' : 'screener'));
+  VIEWS.forEach((name) => el(`tab-${name}`).addEventListener('click', () => setView(name)));
+  setView(viewFromHash());
+  window.addEventListener('hashchange', () => setView(viewFromHash()));
+
+  el('btn-thesis-run').addEventListener('click', runThesis);
+  el('btn-thesis-note').addEventListener('click', writeThesisNote);
 
   el('btn-keys').addEventListener('click', openModal);
   el('btn-keys-close').addEventListener('click', closeModal);
