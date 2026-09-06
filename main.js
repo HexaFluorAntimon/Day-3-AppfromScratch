@@ -696,8 +696,21 @@ function renderDetail({ company, metrics, fundamentals, target, sectorPe, bars }
 
 async function writeStockNote({ company, metrics, fundamentals, ceiling, sizing }) {
   const box = el('stock-note');
+
   if (!state.keys.openRouter) {
-    box.innerHTML = `<div class="callout">Add an OpenRouter key to have the model explain these figures. The numbers above are already computed and do not need it.</div>`;
+    box.innerHTML = `<div class="loading"><div class="spinner"></div><p class="loading__text">Fetching headlines</p></div>`;
+    let items = [];
+    try {
+      items = await getHeadlines(`${company.name} OR ${company.symbol}`, { pageSize: 6 });
+    } catch {
+      items = [];
+    }
+    box.innerHTML = `
+      ${headlineList(items, { synthetic: !state.keys.news && state.demo })}
+      <div class="callout" style="margin-top:${items.length ? '0.9rem' : '0'}">
+        Add an OpenRouter key to have the model explain these figures${items.length ? ' against those stories' : ''}.
+        The numbers above are already computed and do not need it.
+      </div>`;
     return;
   }
   if (!metrics) {
@@ -720,7 +733,7 @@ async function writeStockNote({ company, metrics, fundamentals, ceiling, sizing 
     });
     const text = await generate(prompt, state.keys.openRouter);
     box.innerHTML = `<div class="note">${markdownToHtml(text)}</div>
-      ${headlines.length ? `<p class="t-xs muted" style="margin-top:0.5rem">Headlines cited: ${headlines.slice(0, 6).map((h) => `<a href="${esc(safeUrl(h.url) ?? '#')}" target="_blank" rel="noopener">${esc(h.source)}</a>`).join(' · ')}</p>` : ''}`;
+      <div style="margin-top:1rem">${headlineList(headlines, { synthetic: !state.keys.news && state.demo })}</div>`;
   } catch (err) {
     box.innerHTML = `<div class="callout callout--clay">${esc(err.message)}</div>`;
   }
@@ -1480,12 +1493,61 @@ function runHandle(id) {
       : `<div class="callout">Your current weights already satisfy this objective — no trades needed.</div>`}`;
 }
 
+/**
+ * The headlines themselves, rendered without any model.
+ *
+ * Fetching them and then showing nothing because a *different* key is missing
+ * wastes the request and hides data the app already holds. Only the written
+ * synthesis needs OpenRouter; the stories do not.
+ */
+function headlineList(headlines, { synthetic = false } = {}) {
+  if (!headlines.length) return '';
+  const items = headlines.slice(0, 8).map((h) => {
+    const href = safeUrl(h.url);
+    const when = h.publishedAt ? new Date(h.publishedAt) : null;
+    const stamp = when && !Number.isNaN(when.valueOf()) ? when.toISOString().slice(0, 10) : '';
+    const title = href
+      ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(h.title)}</a>`
+      : esc(h.title);
+    return `<li style="margin-bottom:0.5rem">
+      <span class="t-sm">${title}</span>
+      <span class="co-name">${esc(h.source)}${stamp ? ` · ${esc(stamp)}` : ''}</span>
+    </li>`;
+  }).join('');
+
+  return `
+    <p class="eyebrow" style="margin:0.2rem 0 0.5rem">
+      ${headlines.length} headline${headlines.length === 1 ? '' : 's'}${synthetic ? ' · from the demo archive' : ''}
+    </p>
+    <ul style="list-style:none;padding:0;margin:0">${items}</ul>`;
+}
+
 async function writePortfolioNote() {
   const box = el('pf-note');
+
   if (!state.keys.openRouter) {
-    box.innerHTML = `<div class="callout">Add an OpenRouter key for the written read. Everything above is computed without it.</div>`;
+    // No model available, but the stories are still worth showing.
+    box.innerHTML = `<div class="loading"><div class="spinner"></div><p class="loading__text">Fetching headlines</p></div>`;
+    const top = state.valued
+      ? [...state.valued.holdings].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 4)
+      : [];
+    let items = [];
+    try {
+      items = await getHeadlines(top.map((h) => h.symbol).join(' OR ') || 'markets', { pageSize: 8 });
+    } catch (err) {
+      box.innerHTML = `<div class="callout callout--clay">${esc(err.message)}</div>`;
+      return;
+    }
+    box.innerHTML = `
+      ${headlineList(items, { synthetic: !state.keys.news && state.demo })}
+      <div class="callout" style="margin-top:${items.length ? '0.9rem' : '0'}">
+        ${items.length
+          ? 'These are the stories the note would read. Add an OpenRouter key to have them tied to your holdings and the risk figures above.'
+          : 'Add a news key for headlines, and an OpenRouter key for the written read. Everything above is computed without either.'}
+      </div>`;
     return;
   }
+
   if (!state.risk) {
     box.innerHTML = `<div class="callout">Load the risk model first — the note reads the computed risk figures rather than guessing at them.</div>`;
     return;
@@ -1559,7 +1621,7 @@ async function writePortfolioNote() {
     });
     const text = await generate(prompt, state.keys.openRouter, { maxTokens: 1300 });
     box.innerHTML = `<div class="note">${markdownToHtml(text)}</div>
-      ${headlines.length ? `<p class="t-xs muted" style="margin-top:0.5rem">Headlines: ${headlines.slice(0, 6).map((h) => `<a href="${esc(safeUrl(h.url) ?? '#')}" target="_blank" rel="noopener">${esc(h.source)}</a>`).join(' · ')}</p>` : ''}`;
+      <div style="margin-top:1rem">${headlineList(headlines, { synthetic: !state.keys.news && state.demo })}</div>`;
   } catch (err) {
     box.innerHTML = `<div class="callout callout--clay">${esc(err.message)}</div>`;
   }

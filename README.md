@@ -39,6 +39,12 @@ the banner narrowing to say exactly which is which. Demo data never fills a gap
 in live data — if a live call fails, the panel says so rather than quietly
 substituting the archive.
 
+The one thing the archive does **not** fake is the written note. That needs a
+real model call, and inventing "AI-generated" prose would look like a model had
+read your book when none ran — the single piece of fakery that would actually
+mislead. Without an OpenRouter key both note panels show the headlines they would
+have read and say what the key adds.
+
 The archive is generated, not recorded. Returns are built as a shared market
 factor plus per-name idiosyncratic noise, so the correlation matrix, the
 diversification ratio and the covariance-based handles show the structure
