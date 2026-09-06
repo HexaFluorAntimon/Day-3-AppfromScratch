@@ -660,3 +660,54 @@ td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-
 .swatches i { width: 13px; height: 13px; border-radius: 3px; display: block; }
 
 .view[hidden] { display: none; }
+
+/* ------------------------------------------------------------- demo mode --- */
+
+/* Unmissable by design: if the numbers on screen are synthetic, that fact has to
+   be as visible as the numbers themselves. */
+.demo-bar {
+  background: var(--ochre-soft);
+  border-bottom: 1px solid rgba(208, 139, 31, 0.35);
+  color: var(--ochre-ink);
+  font-size: var(--t-sm);
+}
+.demo-bar[hidden] { display: none; }
+.demo-bar__inner {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0.55rem clamp(0.9rem, 3vw, 2rem);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.demo-bar__tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--ochre);
+  color: #2a1c04;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.demo-bar__inner > span:nth-child(2) { flex: 1; min-width: 220px; }
+.demo-bar .btn { flex-shrink: 0; }
+
+/* The persistent demo marker in the sticky masthead. */
+.demo-pill {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--ochre);
+  color: #2a1c04;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.demo-pill[hidden] { display: none; }
+@media (max-width: 520px) { .demo-pill { font-size: 0.6rem; padding: 0.2rem 0.45rem; } }

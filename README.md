@@ -19,6 +19,29 @@ Built for **Generative AI in Finance**, Executive Academy WU — Day 3 repositor
 
 ---
 
+## Try it without keys
+
+The app ships with a **synthetic demo archive**, so every panel can be explored
+with no API keys at all — click *Explore with demo data* on the Screener, or
+*Load the demo book* on the Portfolio tab.
+
+It is labelled as synthetic wherever it appears: an ochre banner explains it, and
+an ochre **Demo data** pill sits in the sticky header so the label cannot scroll
+out of view while a generated number stays on screen.
+
+The switch to live is **per service and automatic**: save a Twelve Data key and
+prices go live while the archive still supplies fundamentals and headlines, with
+the banner narrowing to say exactly which is which. Demo data never fills a gap
+in live data — if a live call fails, the panel says so rather than quietly
+substituting the archive.
+
+The archive is generated, not recorded. Returns are built as a shared market
+factor plus per-name idiosyncratic noise, so the correlation matrix, the
+diversification ratio and the covariance-based handles show the structure
+equities actually have — a demo of independent random walks would run the same
+code and teach the opposite of the truth. It includes a 25% drawdown, so the
+tail-risk panel has something real to measure.
+
 ## The rule this app is built on
 
 **Arithmetic from the code, language from the model. Nothing is invented.**

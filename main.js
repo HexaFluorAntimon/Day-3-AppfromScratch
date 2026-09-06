@@ -20,13 +20,21 @@ import {
 import { HANDLES, tradesFor, meanDailyReturns, annualisedFor, volFor } from './src/optimize.js';
 import { buildStockPrompt, buildPortfolioPrompt, buildThemePrompt, generate, markdownToHtml } from './src/llm.js';
 import { fetchSectorHeadlines, fetchSectorMoves, coverageRanking } from './src/themes.js';
+import {
+  DEMO_SYMBOLS, DEMO_PORTFOLIO, isDemoSymbol, demoBars, demoQuotes,
+  demoFundamentals, demoPriceTarget, demoSectorPe, demoHeadlines, demoSectorHeadlines,
+  demoSectorMoves
+} from './src/demo.js';
 
 /* ------------------------------------------------------------------ state --- */
 
 const KEY_STORE = 'aura3.keys';
 
+const DEMO_STORE = 'aura3.demo';
+
 const state = {
   keys: { twelve: '', fmp: '', news: '', openRouter: '' },
+  demo: false,
   universe: seedUniverse(),
   sectorFilter: 'All',
   query: '',
@@ -115,6 +123,7 @@ function saveKeys() {
   }
   clearCache();
   renderKeyStatus();
+  renderDemoBanner();
   closeModal();
   bootstrapData();
 }
@@ -129,8 +138,13 @@ function renderKeyStatus() {
   dot.className = `dot ${n === 4 ? 'dot--ok' : n > 0 ? 'dot--warn' : 'dot--off'}`;
   el('key-label').textContent = n === 0 ? 'Keys' : `${n}/4`;
 
-  el('data-badge').textContent = state.keys.twelve ? 'Prices: live' : 'Prices: no key';
-  el('data-badge').className = `tag ${state.keys.twelve ? 'tag--up' : 'tag--neutral'}`;
+  const priceSource = state.keys.twelve ? 'live' : state.demo ? 'demo archive' : 'no key';
+  el('data-badge').textContent = `Prices: ${priceSource}`;
+  el('data-badge').className = `tag ${state.keys.twelve ? 'tag--up' : state.demo ? 'tag--accent' : 'tag--neutral'}`;
+
+  // The invitation is pointless once the archive is already running.
+  const cta = el('demo-cta');
+  if (cta) cta.hidden = state.demo;
 }
 
 function openModal() {
@@ -154,13 +168,150 @@ function setView(view) {
   if (location.hash !== hash) history.replaceState(null, '', hash);
 }
 
+/* ------------------------------------------------------------ data routing --- */
+
+/**
+ * One place decides where each figure comes from.
+ *
+ * The rule is per service and always the same: a key means live, no key in demo
+ * mode means the bundled archive, and no key outside demo mode means nothing at
+ * all. Live therefore always wins — entering a Twelve Data key switches prices
+ * to real while the archive still supplies fundamentals, and every panel reports
+ * which of the two it is showing. Nothing here ever silently fills a live gap
+ * with demo data.
+ */
+const useDemo = (service) => state.demo && !state.keys[service];
+
+async function getBars(symbol, outputsize = 400) {
+  if (state.keys.twelve) return fetchDailyBars(symbol, state.keys.twelve, outputsize);
+  if (useDemo('twelve') && isDemoSymbol(symbol)) return demoBars(symbol);
+  return null;
+}
+
+async function getQuotes(symbols) {
+  if (state.keys.twelve) return fetchQuotes(symbols, state.keys.twelve);
+  if (useDemo('twelve')) return demoQuotes(symbols);
+  return new Map();
+}
+
+async function getFundamentals(symbol) {
+  if (state.keys.fmp) return fetchFundamentals(symbol, state.keys.fmp);
+  if (useDemo('fmp') && isDemoSymbol(symbol)) return demoFundamentals(symbol, state.universe.companies);
+  return null;
+}
+
+async function getPriceTarget(symbol) {
+  if (state.keys.fmp) return fetchPriceTarget(symbol, state.keys.fmp);
+  if (useDemo('fmp') && isDemoSymbol(symbol)) return demoPriceTarget(symbol);
+  return null;
+}
+
+async function getSectorPeMap() {
+  if (state.keys.fmp) return fetchSectorPe(state.keys.fmp);
+  if (useDemo('fmp')) return demoSectorPe();
+  return null;
+}
+
+async function getHeadlines(query, options = {}) {
+  if (state.keys.news) return fetchHeadlines(query, state.keys.news, options);
+  if (useDemo('news')) return demoHeadlines(query, options);
+  return [];
+}
+
+/** Which services are running on the archive right now. */
+function demoServices() {
+  if (!state.demo) return [];
+  return [
+    !state.keys.twelve && 'prices',
+    !state.keys.fmp && 'fundamentals',
+    !state.keys.news && 'headlines'
+  ].filter(Boolean);
+}
+
+function setDemo(on) {
+  state.demo = on;
+  try {
+    if (on) localStorage.setItem(DEMO_STORE, '1');
+    else localStorage.removeItem(DEMO_STORE);
+  } catch { /* private mode: demo lasts for this tab only */ }
+
+  clearCache();
+  state.metrics.clear();
+  state.fundamentals.clear();
+  state.bars.clear();
+  state.marketReturns = null;
+  state.sectorPe = null;
+  state.selected = null;
+  el('detail-panel').hidden = true;
+
+  renderDemoBanner();
+  renderKeyStatus();
+  if (on) primeDemoMetrics();
+  renderScreener();
+  bootstrapData();
+}
+
+/**
+ * Fill the screener from the archive straight away.
+ *
+ * Against a live API this has to be a deliberate, batched action — eight names
+ * a minute. The archive is generated locally at no cost, so making someone click
+ * a button to see a table of dashes fill in would be ceremony for its own sake.
+ */
+function primeDemoMetrics() {
+  const market = demoBars(MARKET_PROXY);
+  if (market) {
+    state.bars.set(MARKET_PROXY, market);
+    state.marketReturns = simpleReturns(market.map((b) => b.close));
+  }
+  for (const symbol of DEMO_SYMBOLS) {
+    if (symbol === MARKET_PROXY) continue;
+    const bars = demoBars(symbol);
+    if (!bars) continue;
+    state.bars.set(symbol, bars);
+    state.metrics.set(symbol, priceMetrics(bars, state.marketReturns));
+    const f = demoFundamentals(symbol, state.universe.companies);
+    if (f) state.fundamentals.set(symbol, f);
+  }
+  state.sectorPe = demoSectorPe();
+}
+
+/** The banner that makes demo mode impossible to miss. */
+function renderDemoBanner() {
+  const services = demoServices();
+  const bar = el('demo-bar');
+  const pill = el('demo-pill');
+
+  // The banner explains; the pill persists. The banner scrolls away with the
+  // page, so on its own it would let a synthetic number be read as a real one
+  // further down — the pill lives in the sticky masthead and never leaves.
+  if (pill) pill.hidden = !services.length;
+  if (!services.length) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const live = ['twelve', 'fmp', 'news'].filter((k) => state.keys[k]).length;
+  bar.innerHTML = `
+    <div class="demo-bar__inner">
+      <span class="demo-bar__tag">Demo data</span>
+      <span>
+        Showing a <strong>synthetic archive</strong> for ${esc(services.join(', '))} — generated
+        numbers, not market data.${live ? ' Your keys are live for the rest.' : ''}
+        Add API keys and this switches to live automatically.
+      </span>
+      <button class="btn btn--sm" id="btn-demo-off">Turn off</button>
+    </div>`;
+  el('btn-demo-off').addEventListener('click', () => setDemo(false));
+}
+
 /* ------------------------------------------------------------------- tape --- */
 
 async function renderTape() {
   const track = el('tape-track');
   const symbols = [MARKET_PROXY, 'XLE', 'XLK', 'XLF', 'XLV', 'XLI'];
 
-  if (!state.keys.twelve) {
+  if (!state.keys.twelve && !state.demo) {
     // A single item must not scroll: the marquee translates by -50%, which is
     // only seamless when the track is the same content twice.
     track.classList.add('tape__track--static');
@@ -169,7 +320,7 @@ async function renderTape() {
   }
   track.classList.remove('tape__track--static');
   try {
-    const quotes = await fetchQuotes(symbols, state.keys.twelve);
+    const quotes = await getQuotes(symbols);
     if (!quotes.size) {
       track.innerHTML = `<span class="tape__item">No quotes returned</span>`;
       return;
@@ -240,7 +391,16 @@ function filteredCompanies() {
     return null;
   };
 
+  // In demo mode the archive covers a subset of the universe: float those names
+  // to the top so what the app can actually show is what you see first.
+  const demoFirst = state.demo && !state.keys.twelve && state.sort.field === 'symbol';
+
   return [...rows].sort((a, b) => {
+    if (demoFirst) {
+      const da = isDemoSymbol(a.symbol) ? 0 : 1;
+      const db = isDemoSymbol(b.symbol) ? 0 : 1;
+      if (da !== db) return da - db;
+    }
     const va = valueOf(a);
     const vb = valueOf(b);
     if (typeof va === 'string') return va.localeCompare(vb) * dir;
@@ -289,12 +449,13 @@ function renderScreener() {
 
 /** Load metrics for the visible page, respecting the free-tier request budget. */
 async function loadVisibleMetrics() {
-  if (!state.keys.twelve) {
-    toast('Add a Twelve Data key to load prices and metrics.', 'accent');
+  if (!state.keys.twelve && !state.demo) {
+    toast('Add a Twelve Data key, or switch on demo data, to load prices and metrics.', 'accent');
     return;
   }
   const btn = el('btn-load-metrics');
-  const rows = filteredCompanies().slice(0, 8); // 8 calls/minute on the free tier
+  // Eight is the free tier's per-minute ceiling; the archive has no such limit.
+  const rows = filteredCompanies().slice(0, state.keys.twelve ? 8 : 24);
   btn.disabled = true;
   btn.textContent = `Loading 0/${rows.length}`;
 
@@ -302,13 +463,13 @@ async function loadVisibleMetrics() {
   for (const c of rows) {
     try {
       if (!state.bars.has(c.symbol)) {
-        const bars = await fetchDailyBars(c.symbol, state.keys.twelve, 300);
+        const bars = await getBars(c.symbol, 300);
         if (bars) state.bars.set(c.symbol, bars);
       }
       const bars = state.bars.get(c.symbol);
       if (bars) state.metrics.set(c.symbol, priceMetrics(bars, state.marketReturns));
-      if (state.keys.fmp && !state.fundamentals.has(c.symbol)) {
-        const f = await fetchFundamentals(c.symbol, state.keys.fmp);
+      if (!state.fundamentals.has(c.symbol)) {
+        const f = await getFundamentals(c.symbol);
         if (f) state.fundamentals.set(c.symbol, f);
       }
     } catch (err) {
@@ -340,8 +501,8 @@ async function selectCompany(symbol) {
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   try {
-    if (state.keys.twelve && !state.bars.has(symbol)) {
-      const bars = await fetchDailyBars(symbol, state.keys.twelve, 400);
+    if (!state.bars.has(symbol)) {
+      const bars = await getBars(symbol, 400);
       if (bars) state.bars.set(symbol, bars);
     }
     const bars = state.bars.get(symbol) ?? null;
@@ -349,16 +510,16 @@ async function selectCompany(symbol) {
     if (metrics) state.metrics.set(symbol, metrics);
 
     let fundamentals = state.fundamentals.get(symbol) ?? null;
-    if (state.keys.fmp && !fundamentals) {
+    if (!fundamentals) {
       try {
-        fundamentals = await fetchFundamentals(symbol, state.keys.fmp);
+        fundamentals = await getFundamentals(symbol);
         if (fundamentals) state.fundamentals.set(symbol, fundamentals);
       } catch (err) {
         toast(`Fundamentals: ${err.message}`, 'clay');
       }
     }
 
-    const target = state.keys.fmp ? await fetchPriceTarget(symbol, state.keys.fmp) : null;
+    const target = await getPriceTarget(symbol);
     const sectorPe = state.sectorPe?.get(company.sector) ?? null;
 
     renderDetail({ company, metrics, fundamentals, target, sectorPe, bars });
@@ -438,8 +599,8 @@ function renderDetail({ company, metrics, fundamentals, target, sectorPe, bars }
     : '';
 
   const needsKeys = [];
-  if (!state.keys.twelve) needsKeys.push('Twelve Data for prices, ATR and volatility');
-  if (!state.keys.fmp) needsKeys.push('FMP for EPS, sector multiples and consensus targets');
+  if (!state.keys.twelve && !state.demo) needsKeys.push('Twelve Data for prices, ATR and volatility');
+  if (!state.keys.fmp && !state.demo) needsKeys.push('FMP for EPS, sector multiples and consensus targets');
 
   el('detail-panel').innerHTML = `
     <div class="card plate card-pad">
@@ -537,12 +698,10 @@ async function writeStockNote({ company, metrics, fundamentals, ceiling, sizing 
   box.innerHTML = `<div class="loading"><div class="spinner"></div><p class="loading__text">Writing</p></div>`;
 
   let headlines = [];
-  if (state.keys.news) {
-    try {
-      headlines = await fetchHeadlines(`${company.name} OR ${company.symbol}`, state.keys.news, { pageSize: 8 });
-    } catch (err) {
-      console.warn(`[news] ${err.message}`);
-    }
+  try {
+    headlines = await getHeadlines(`${company.name} OR ${company.symbol}`, { pageSize: 8 });
+  } catch (err) {
+    console.warn(`[news] ${err.message}`);
   }
 
   try {
@@ -564,7 +723,7 @@ async function findThemes() {
   const body = el('themes-body');
   const btn = el('btn-themes');
 
-  if (!state.keys.news) {
+  if (!state.keys.news && !state.demo) {
     body.innerHTML = `<div class="callout">A news key is needed to read headlines — newsdata.io (a key starting <span class="mono">pub_</span>) or NewsAPI.org. Without one there is nothing to derive themes from, and inventing them would defeat the point.</div>`;
     return;
   }
@@ -572,7 +731,9 @@ async function findThemes() {
   body.innerHTML = `<div class="loading"><div class="spinner"></div><p class="loading__text">Reading the last seven days</p></div>`;
 
   try {
-    const { bySector: sectorHeadlines, errors } = await fetchSectorHeadlines(state.keys.news);
+    const { bySector: sectorHeadlines, errors } = state.keys.news
+      ? await fetchSectorHeadlines(state.keys.news)
+      : { bySector: demoSectorHeadlines(), errors: [] };
     const ranking = coverageRanking(sectorHeadlines);
 
     if (!ranking.length) {
@@ -598,7 +759,12 @@ async function findThemes() {
     let moves = new Map();
     let movesError = null;
     try {
-      moves = await fetchSectorMoves(state.keys.twelve, ranking.slice(0, 6).map((r) => r.sector));
+      const shown = ranking.slice(0, 6).map((r) => r.sector);
+      moves = state.keys.twelve
+        ? await fetchSectorMoves(state.keys.twelve, shown)
+        : state.demo
+          ? demoSectorMoves(shown, state.universe.companies)
+          : new Map();
     } catch (err) {
       movesError = err.message;
     }
@@ -786,12 +952,10 @@ async function analysePortfolio() {
   const symbols = state.holdings.map((h) => h.symbol);
   let quotes = new Map();
 
-  if (state.keys.twelve) {
-    try {
-      quotes = await fetchQuotes(symbols, state.keys.twelve);
-    } catch (err) {
-      toast(`Quotes: ${err.message}`, 'clay');
-    }
+  try {
+    quotes = await getQuotes(symbols);
+  } catch (err) {
+    toast(`Quotes: ${err.message}`, 'clay');
   }
   state.valued = valueHoldings(state.holdings, quotes);
 
@@ -801,8 +965,8 @@ async function analysePortfolio() {
 }
 
 async function loadRiskModel() {
-  if (!state.keys.twelve) {
-    toast('A Twelve Data key is needed for the history the risk model runs on.', 'accent');
+  if (!state.keys.twelve && !state.demo) {
+    toast('A Twelve Data key, or demo data, is needed for the history the risk model runs on.', 'accent');
     return;
   }
   const btn = el('btn-risk');
@@ -815,7 +979,7 @@ async function loadRiskModel() {
     if (!state.bars.has(sym)) {
       try {
         btn.textContent = `Loading ${done + 1}/${symbols.length}`;
-        const bars = await fetchDailyBars(sym, state.keys.twelve, 400);
+        const bars = await getBars(sym, 400);
         if (bars) state.bars.set(sym, bars);
       } catch (err) {
         toast(`${sym}: ${err.message}`, 'clay');
@@ -828,7 +992,7 @@ async function loadRiskModel() {
   // The market proxy, for beta.
   if (!state.bars.has(MARKET_PROXY)) {
     try {
-      const bars = await fetchDailyBars(MARKET_PROXY, state.keys.twelve, 400);
+      const bars = await getBars(MARKET_PROXY, 400);
       if (bars) {
         state.bars.set(MARKET_PROXY, bars);
         state.marketReturns = simpleReturns(bars.map((b) => b.close));
@@ -1322,13 +1486,11 @@ async function writePortfolioNote() {
   const top = [...v.holdings].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 6);
 
   let headlines = [];
-  if (state.keys.news) {
-    try {
-      const query = top.slice(0, 4).map((h) => h.symbol).join(' OR ');
-      headlines = await fetchHeadlines(query, state.keys.news, { pageSize: 10 });
-    } catch (err) {
-      console.warn(`[news] ${err.message}`);
-    }
+  try {
+    const query = top.slice(0, 4).map((h) => h.symbol).join(' OR ');
+    headlines = await getHeadlines(query, { pageSize: 10 });
+  } catch (err) {
+    console.warn(`[news] ${err.message}`);
   }
 
   const handle = state.activeHandle ? HANDLES.find((h) => h.id === state.activeHandle) : null;
@@ -1420,12 +1582,12 @@ async function bootstrapData() {
   renderSectorChips();
   renderScreener();
 
-  if (state.keys.fmp && !state.sectorPe) {
-    state.sectorPe = await fetchSectorPe(state.keys.fmp);
+  if (!state.sectorPe) {
+    state.sectorPe = await getSectorPeMap();
   }
-  if (state.keys.twelve && !state.marketReturns) {
+  if (!state.marketReturns) {
     try {
-      const bars = await fetchDailyBars(MARKET_PROXY, state.keys.twelve, 400);
+      const bars = await getBars(MARKET_PROXY, 400);
       if (bars) {
         state.bars.set(MARKET_PROXY, bars);
         state.marketReturns = simpleReturns(bars.map((b) => b.close));
@@ -1442,6 +1604,10 @@ function renderUniverseBadge() {
   if (u.source === 'fmp') {
     badge.textContent = `Universe: ${u.companies.length} constituents (live from FMP)`;
     badge.className = 'tag tag--up';
+  } else if (state.demo && !state.keys.fmp) {
+    badge.textContent = `Universe: ${u.companies.length} names · ${DEMO_SYMBOLS.length - 1} with demo data`;
+    badge.className = 'tag tag--accent';
+    badge.title = 'The screener lists the bundled subset; the demo archive carries prices and fundamentals for its own names';
   } else {
     badge.textContent = `Universe: ${u.companies.length}-name bundled subset`;
     badge.className = 'tag tag--neutral';
@@ -1474,6 +1640,11 @@ function wireAssumptions() {
 
 function init() {
   loadKeys();
+  try {
+    state.demo = localStorage.getItem(DEMO_STORE) === '1';
+  } catch { /* private mode: start live-only */ }
+  renderDemoBanner();
+  if (state.demo && !state.keys.twelve) primeDemoMetrics();
 
   el('tab-screener').addEventListener('click', () => setView('screener'));
   el('tab-portfolio').addEventListener('click', () => setView('portfolio'));
@@ -1488,6 +1659,7 @@ function init() {
     try { localStorage.removeItem(KEY_STORE); } catch { /* ignore */ }
     state.keys = { twelve: '', fmp: '', news: '', openRouter: '' };
     renderKeyStatus();
+    renderDemoBanner();
     toast('Keys cleared from this browser.');
   });
   el('keys-overlay').addEventListener('click', (e) => {
@@ -1522,6 +1694,17 @@ function init() {
     if (e.target.files?.[0]) handleFile(e.target.files[0]);
   });
   el('btn-sample').addEventListener('click', () => ingestRows(parseCsv(SAMPLE_CSV), 'sample-book.csv'));
+  el('btn-demo-book').addEventListener('click', () => {
+    // Ten names the archive prices, so the risk model and every handle run.
+    if (!state.demo) setDemo(true);
+    const rows = [['ticker', 'quantity', 'cost_basis']].concat(
+      DEMO_PORTFOLIO.map((h) => [h.symbol, String(h.quantity), String(h.costBasis)])
+    );
+    ingestRows(rows, 'demo-book.csv (synthetic)');
+  });
+
+  el('btn-demo-on').addEventListener('click', () => setDemo(true));
+  el('btn-demo-modal').addEventListener('click', () => { closeModal(); setDemo(true); });
   ['dragenter', 'dragover'].forEach((evt) =>
     dz.addEventListener(evt, (e) => { e.preventDefault(); dz.classList.add('is-over'); })
   );
