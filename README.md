@@ -140,7 +140,7 @@ committed, logged or proxied.
 |---|---|---|
 | **Twelve Data** | prices, history, ATR, volatility, beta | [twelvedata.com](https://twelvedata.com/pricing) |
 | **FMP** | the full constituent list, P/E, EPS, yields, targets, sector multiples | [financialmodelingprep.com](https://financialmodelingprep.com/developer/docs) |
-| **NewsAPI** | headlines for the themes and the portfolio read | [newsapi.org](https://newsapi.org) |
+| **News** | headlines for the themes and the portfolio read | [newsdata.io](https://newsdata.io) — see below |
 | **OpenRouter** | the written notes | [openrouter.ai](https://openrouter.ai) |
 
 Free tiers are small — Twelve Data allows 8 requests/minute — so quotes are
@@ -213,3 +213,23 @@ Field names differ between the two generations (`mktCap` → `marketCap`,
 `peRatioTTM` → `priceToEarningsRatioTTM`, and others), so each metric is read
 through a list of known aliases. A field that matches none of them stays `null`
 and renders as `—` — a rename costs a missing figure, never a wrong one.
+
+
+### Which news key to use
+
+The service is detected from the key, so paste whichever you hold:
+
+- **newsdata.io** (key starts `pub_`) — **use this one for the deployed page.**
+  Its free tier serves browser requests.
+- **NewsAPI.org** (32 hex characters) — works from `localhost` only. Its free
+  Developer plan refuses requests from a deployed origin (HTTP 426), so on
+  GitHub Pages it cannot work at all. The app says so explicitly rather than
+  showing an empty result.
+
+### Which FMP endpoints the free plan covers
+
+`sp500-constituent` is a paid endpoint. Without it the app keeps the bundled
+121-name subset and labels the universe accordingly — everything else still
+works. Consensus price targets are likewise paid on most plans, in which case
+two of the four entry anchors report themselves unavailable and the ceiling is
+built from the remaining two.

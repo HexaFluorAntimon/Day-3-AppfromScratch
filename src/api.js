@@ -72,9 +72,20 @@ export async function fetchJson(url, label) {
     throw new Error(`${label}: (HTTP ${res.status}) ${body.slice(0, 180).trim() || 'non-JSON response'}`);
   }
 
-  // Twelve Data reports errors in-band with HTTP 200.
+  // Several of these services report failure in-band, each in its own shape:
+  //   Twelve Data  { status: 'error', message }
+  //   newsdata.io  { status: 'error', results: { message } }
+  //   NewsAPI      { status: 'error', code, message }   (with an HTTP status)
+  // Pull the message from wherever it actually is and keep the code and status,
+  // because the caller matches on them to explain what to do next. Losing them
+  // here is how a refused key came to read as "no results".
   if (data && data.status === 'error') {
-    throw new Error(`${label}: ${data.message || 'request failed'}`);
+    const message = data.message ?? data.results?.message ?? data.error ?? 'request failed';
+    const parts = [`${label}:`];
+    if (!res.ok) parts.push(`(HTTP ${res.status})`);
+    if (data.code) parts.push(`[${data.code}]`);
+    parts.push(compactFmpMessage(message));
+    throw new Error(parts.join(' '));
   }
   // FMP uses { "Error Message": ... }
   if (data && data['Error Message']) {
@@ -383,35 +394,108 @@ export async function fetchSectorPe(fmpKey) {
   return null;
 }
 
-/* ---------------------------------------------------------------- NewsAPI --- */
+/* ------------------------------------------------------------------- news --- */
+
+/**
+ * Which news service a key belongs to, decided by the key itself.
+ *
+ * newsdata.io keys are prefixed "pub_"; NewsAPI.org keys are 32 hex characters.
+ * Detecting rather than asking means you paste whichever key you have and it
+ * works — and it matters which one, because NewsAPI.org's free Developer plan
+ * REFUSES browser requests from a deployed origin (localhost only, HTTP 426).
+ * On GitHub Pages that plan cannot work at all, whereas newsdata.io's free tier
+ * allows browser calls.
+ */
+export function newsProvider(key) {
+  const k = String(key ?? '').trim();
+  if (!k) return null;
+  if (/^pub_/i.test(k)) return 'newsdata';
+  return 'newsapi';
+}
 
 /**
  * Headlines for a query (a ticker, a company name, or a sector theme).
- * Returns [] when there is no key — the UI then says "add a NewsAPI key for
- * live headlines" instead of showing a curated feed dressed up as live news.
+ *
+ * Returns [] only when there is no key or no query. A service that answers with
+ * an error THROWS, so the caller can say what went wrong — silently returning an
+ * empty list made a refused request look like a quiet news week.
  */
 export async function fetchHeadlines(query, newsKey, { pageSize = 12, days = 7 } = {}) {
   if (!newsKey || !query) return [];
-  const key = `news:${query}:${pageSize}:${days}`;
+
+  const provider = newsProvider(newsKey);
+  const key = `news:${provider}:${query}:${pageSize}:${days}`;
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
+  const articles = provider === 'newsdata'
+    ? await fetchNewsdata(query, newsKey, pageSize)
+    : await fetchNewsapi(query, newsKey, pageSize, days);
+
+  cacheSet(key, articles);
+  return articles;
+}
+
+/**
+ * newsdata.io. Its free tier serves browser requests, which is what makes it
+ * usable from a static page on GitHub Pages.
+ *
+ * The query grammar is stricter than NewsAPI's: `q` is capped at 100 characters
+ * and rejects unbalanced quotes, so the caller's phrase is trimmed to fit rather
+ * than being sent and refused.
+ */
+async function fetchNewsdata(query, apiKey, pageSize) {
+  const q = String(query).slice(0, 95).replace(/["']/g, '').trim();
+  const url =
+    `https://newsdata.io/api/1/latest?apikey=${encodeURIComponent(apiKey)}` +
+    `&q=${encodeURIComponent(q)}&language=en`;
+
+  const raw = await fetchJson(url, 'newsdata.io');
+
+  // newsdata.io reports failure in-band: { status: "error", results: { message } }
+  if (raw?.status === 'error') {
+    const message = raw.results?.message ?? raw.message ?? 'request failed';
+    throw new Error(`newsdata.io: ${message}`);
+  }
+
+  return (raw?.results ?? []).slice(0, pageSize).map((a) => ({
+    title: a.title ?? '',
+    source: a.source_name || a.source_id || 'Unknown',
+    url: a.link ?? null,
+    publishedAt: a.pubDate ?? null,
+    description: a.description ?? ''
+  }));
+}
+
+/** NewsAPI.org. Works on localhost; its free plan refuses deployed origins. */
+async function fetchNewsapi(query, apiKey, pageSize, days) {
   const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
   const url =
     `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}` +
     `&from=${from}&language=en&sortBy=publishedAt&pageSize=${pageSize}` +
-    `&apiKey=${encodeURIComponent(newsKey)}`;
+    `&apiKey=${encodeURIComponent(apiKey)}`;
 
-  const raw = await fetchJson(url, 'NewsAPI');
-  const articles = (raw?.articles ?? []).map((a) => ({
+  let raw;
+  try {
+    raw = await fetchJson(url, 'NewsAPI');
+  } catch (err) {
+    // 426 is NewsAPI's "this plan may not be used from a browser on a deployed
+    // site". Name the actual remedy instead of leaving a status code.
+    if (/\b426\b|upgrade required|corsNotAllowed|not allowed on the Developer plan|browser/i.test(err.message)) {
+      throw new Error(
+        'NewsAPI: the free Developer plan only serves requests from localhost, so it cannot work on a deployed page. Use a newsdata.io key (starts with "pub_") instead.'
+      );
+    }
+    throw err;
+  }
+
+  return (raw?.articles ?? []).map((a) => ({
     title: a.title ?? '',
     source: a.source?.name ?? 'Unknown',
     url: a.url ?? null,
     publishedAt: a.publishedAt ?? null,
     description: a.description ?? ''
   }));
-  cacheSet(key, articles);
-  return articles;
 }
 
 /** True when a URL is safe to render as a link. */

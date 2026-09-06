@@ -25,28 +25,36 @@ const SECTOR_QUERIES = {
 };
 
 /**
- * Fetch headlines per sector. Sectors that return nothing are simply absent —
- * there is no filler.
+ * Fetch headlines per sector.
+ *
+ * Returns { bySector, errors }. A sector that genuinely has no stories and a
+ * sector whose request was REFUSED are different facts, and conflating them is
+ * how a rejected API key comes to look like a quiet news week — so failures are
+ * collected and handed back rather than swallowed.
  */
 export async function fetchSectorHeadlines(newsKey, sectors = Object.keys(SECTOR_QUERIES)) {
-  if (!newsKey) return {};
-  const out = {};
+  if (!newsKey) return { bySector: {}, errors: [] };
 
-  // Sequential: NewsAPI's developer tier is rate limited, and a burst of eleven
-  // parallel requests is the fastest way to get a 429.
+  const bySector = {};
+  const errors = [];
+
+  // Sequential: the free tiers are rate limited, and a burst of eleven parallel
+  // requests is the fastest way to get a 429.
   for (const sector of sectors) {
     const query = SECTOR_QUERIES[sector];
     if (!query) continue;
     try {
       const items = await fetchHeadlines(query, newsKey, { pageSize: 6, days: 7 });
-      if (items.length) out[sector] = items;
+      if (items.length) bySector[sector] = items;
     } catch (err) {
-      // One sector failing must not lose the other ten.
-      out[sector] = [];
-      console.warn(`[themes] ${sector}: ${err.message}`);
+      errors.push({ sector, message: err.message });
+      // A rate limit will hit every remaining sector too: stop rather than
+      // spend the rest of the daily quota collecting the same refusal.
+      if (/\b429\b|rate limit|quota|exceeded/i.test(err.message)) break;
     }
   }
-  return out;
+
+  return { bySector, errors };
 }
 
 /**

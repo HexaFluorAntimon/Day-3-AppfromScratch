@@ -352,11 +352,14 @@ XOM,60,104.25</pre>
           </p>
         </div>
         <div>
-          <label class="field-label" for="k-news">NewsAPI — headlines</label>
-          <input type="password" id="k-news" placeholder="NewsAPI key" autocomplete="off" />
+          <label class="field-label" for="k-news">News — headlines</label>
+          <input type="password" id="k-news" placeholder="pub_… (newsdata.io) or a NewsAPI key" autocomplete="off" />
           <p class="t-xs muted" style="margin-top: 0.2rem">
-            Powers the live themes and the news read on your holdings.
-            <a href="https://newsapi.org" target="_blank" rel="noopener">Get a key</a>
+            Powers the live themes and the news read on your holdings. The service
+            is detected from the key.
+            <strong>Use <a href="https://newsdata.io" target="_blank" rel="noopener">newsdata.io</a></strong>
+            for the deployed page — NewsAPI.org's free plan only serves
+            <span class="mono">localhost</span> and refuses a live site.
           </p>
         </div>
         <div>

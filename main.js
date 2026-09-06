@@ -563,20 +563,32 @@ async function findThemes() {
   const btn = el('btn-themes');
 
   if (!state.keys.news) {
-    body.innerHTML = `<div class="callout">A NewsAPI key is needed to read headlines. Without it there is nothing to derive themes from — and inventing them would defeat the point.</div>`;
+    body.innerHTML = `<div class="callout">A news key is needed to read headlines — newsdata.io (a key starting <span class="mono">pub_</span>) or NewsAPI.org. Without one there is nothing to derive themes from, and inventing them would defeat the point.</div>`;
     return;
   }
   btn.disabled = true;
   body.innerHTML = `<div class="loading"><div class="spinner"></div><p class="loading__text">Reading the last seven days</p></div>`;
 
   try {
-    const sectorHeadlines = await fetchSectorHeadlines(state.keys.news);
+    const { bySector: sectorHeadlines, errors } = await fetchSectorHeadlines(state.keys.news);
     const ranking = coverageRanking(sectorHeadlines);
+
     if (!ranking.length) {
-      body.innerHTML = `<div class="callout">No headlines came back for any sector in the last seven days.</div>`;
+      // No stories and a refused request are different facts — say which.
+      body.innerHTML = errors.length
+        ? `<div class="callout callout--clay">
+             <strong>The news service refused the request.</strong><br>${esc(errors[0].message)}
+           </div>`
+        : `<div class="callout">No headlines came back for any sector in the last seven days.</div>`;
       btn.disabled = false;
       return;
     }
+
+    const partialWarning = errors.length
+      ? `<div class="callout callout--clay" style="margin-bottom:0.8rem">
+           ${errors.length} sector${errors.length === 1 ? '' : 's'} could not be fetched: ${esc(errors[0].message)}
+         </div>`
+      : '';
 
     const moves = await fetchSectorMoves(state.keys.twelve, ranking.map((r) => r.sector));
 
@@ -606,7 +618,7 @@ async function findThemes() {
       themesHtml = `<div class="callout">Headline counts above are live. Add an OpenRouter key to have the themes named and tied back to the specific stories.</div>`;
     }
 
-    body.innerHTML = coverageHtml + themesHtml;
+    body.innerHTML = partialWarning + coverageHtml + themesHtml;
     body.querySelectorAll('[data-theme-sector]').forEach((card) =>
       card.addEventListener('click', () => {
         state.sectorFilter = card.dataset.themeSector;
@@ -1256,7 +1268,16 @@ async function bootstrapData() {
       state.universe = await loadFullUniverse(state.keys.fmp, fetchJson);
       toast(`Loaded ${state.universe.companies.length} S&P 500 constituents from FMP.`);
     } catch (err) {
-      toast(`Constituent list: ${err.message} — using the bundled subset.`, 'accent');
+      // The constituent list is a paid FMP endpoint. Falling back to the bundled
+      // subset is the designed behaviour, not a failure, so this is stated once
+      // and quietly — the universe badge already says which list is in use.
+      const restricted = /\b402\b|restricted|not available under your current subscription/i.test(err.message);
+      toast(
+        restricted
+          ? 'The full constituent list is a paid FMP endpoint — using the bundled 121-name subset. Everything else works normally.'
+          : `Constituent list: ${err.message} — using the bundled subset.`,
+        restricted ? 'mint' : 'accent'
+      );
     }
   }
   renderUniverseBadge();
