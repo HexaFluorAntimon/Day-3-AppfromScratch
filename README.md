@@ -200,3 +200,16 @@ Educational analysis under assumptions you set on screen — **not investment
 advice**, and not a recommendation to buy or sell anything. The sizing panel exists
 to make the arithmetic of risk visible, not to tell you what to own. Every number
 it prints can be recomputed by hand from the inputs it names.
+
+### FMP "Legacy Endpoint" errors
+
+FMP retired their `/api/v3` and `/api/v4` routes in 2025: they answer
+`Legacy Endpoint` for any account created after **31 August 2025**, while
+long-standing subscriptions still work on them. The app calls the current
+`/stable` routes first and falls back to the legacy ones, so it works on either
+kind of account without being told which you hold.
+
+Field names differ between the two generations (`mktCap` → `marketCap`,
+`peRatioTTM` → `priceToEarningsRatioTTM`, and others), so each metric is read
+through a list of known aliases. A field that matches none of them stays `null`
+and renders as `—` — a rename costs a missing figure, never a wrong one.

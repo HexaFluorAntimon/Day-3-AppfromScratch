@@ -204,16 +204,37 @@ export function seedUniverse() {
 
 /**
  * Replace the seed with the real S&P 500 constituent list from FMP.
- * Throws on failure — the caller keeps the seed and tells the user why, rather
+ *
+ * FMP retired /api/v3 in 2025 — it answers "Legacy Endpoint" for accounts
+ * created after 31 August 2025, while older subscriptions still work on it — so
+ * the current /stable path is tried first and the legacy one second.
+ *
+ * Throws on failure: the caller keeps the seed and tells the user why, rather
  * than silently pretending the subset is the whole index.
  */
 export async function loadFullUniverse(fmpKey, fetchJson) {
-  const rows = await fetchJson(
-    `https://financialmodelingprep.com/api/v3/sp500_constituent?apikey=${encodeURIComponent(fmpKey)}`,
-    'FMP constituents'
-  );
-  if (!Array.isArray(rows) || rows.length === 0) {
-    throw new Error('FMP returned no constituents');
+  const k = encodeURIComponent(fmpKey);
+  const urls = [
+    `https://financialmodelingprep.com/stable/sp500-constituent?apikey=${k}`,
+    `https://financialmodelingprep.com/api/v3/sp500_constituent?apikey=${k}`
+  ];
+
+  let rows = null;
+  let firstError = null;
+  for (const url of urls) {
+    try {
+      const data = await fetchJson(url, 'FMP constituents');
+      if (Array.isArray(data) && data.length) {
+        rows = data;
+        break;
+      }
+    } catch (err) {
+      if (!firstError) firstError = err;
+    }
+  }
+
+  if (!rows) {
+    throw firstError ?? new Error('FMP returned no constituents');
   }
   const companies = rows
     .filter((r) => r && r.symbol)

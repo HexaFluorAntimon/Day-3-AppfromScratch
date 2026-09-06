@@ -42,6 +42,21 @@ function statusHint(status) {
 }
 
 /**
+ * FMP's legacy-endpoint refusal is a five-line paragraph. Keep the meaning and
+ * the remedy, drop the prose, so the message fits the toast that shows it.
+ */
+function compactFmpMessage(message) {
+  const text = String(message);
+  if (/legacy endpoint/i.test(text)) {
+    return 'this endpoint was retired by FMP for accounts created after 31 Aug 2025 — the app already retries on their current API, so this plan likely does not include it';
+  }
+  if (/exclusive endpoint|upgrade|premium/i.test(text)) {
+    return `not included in this FMP plan (${text.slice(0, 90).trim()})`;
+  }
+  return text.length > 180 ? `${text.slice(0, 180).trim()}…` : text;
+}
+
+/**
  * JSON fetch that fails loudly and legibly.
  * Reads the body as text first so a non-JSON error page yields a readable
  * message instead of "Unexpected token < in JSON".
@@ -63,7 +78,7 @@ export async function fetchJson(url, label) {
   }
   // FMP uses { "Error Message": ... }
   if (data && data['Error Message']) {
-    throw new Error(`${label}: ${data['Error Message']}`);
+    throw new Error(`${label}: ${compactFmpMessage(data['Error Message'])}`);
   }
   // NewsAPI uses { status: 'error', message }
   if (data && data.status === 'error' && data.message) {
@@ -155,9 +170,67 @@ export async function fetchQuotes(symbols, twelveKey) {
 
 /* -------------------------------------------------------------------- FMP --- */
 
+const FMP = 'https://financialmodelingprep.com';
+
+/**
+ * FMP retired the /api/v3 and /api/v4 paths in 2025: they now answer
+ * "Legacy Endpoint" for any account created after 31 August 2025, while
+ * long-standing subscriptions still work on them. So every call tries the
+ * current /stable path first and falls back to the legacy one, which keeps the
+ * app working on both kinds of account without guessing which you hold.
+ */
+async function fmpFetch(urlBuilders, fmpKey, label) {
+  const k = encodeURIComponent(fmpKey);
+  let firstError = null;
+  for (const build of urlBuilders) {
+    try {
+      return await fetchJson(build(k), label);
+    } catch (err) {
+      if (!firstError) firstError = err;
+    }
+  }
+  throw firstError ?? new Error(`${label}: no endpoint answered`);
+}
+
+/**
+ * Read one number from whichever of several response shapes actually carries it.
+ *
+ * The stable API renamed a number of fields (mktCap -> marketCap, peRatioTTM ->
+ * priceToEarningsRatioTTM, and so on) and the two generations are both in the
+ * wild. Trying the known aliases in order means a rename costs a missing field
+ * at worst — and a field that is genuinely absent stays null, so it renders as
+ * "—" instead of being filled with something plausible.
+ */
+function pickNum(sources, names) {
+  for (const src of sources) {
+    if (!src) continue;
+    for (const n of names) {
+      const v = src[n];
+      if (v === null || v === undefined || v === '') continue;
+      const asNumber = Number(v);
+      if (Number.isFinite(asNumber)) return asNumber;
+    }
+  }
+  return null;
+}
+
+function pickStr(sources, names) {
+  for (const src of sources) {
+    if (!src) continue;
+    for (const n of names) {
+      const v = src[n];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+/** FMP returns either a bare object or a one-element array depending on route. */
+const firstRow = (data) => (Array.isArray(data) ? data[0] ?? null : data ?? null);
+
 /**
  * Fundamentals for one symbol: valuation multiples, growth, margins, yield,
- * beta. Every field may legitimately be null — FMP's free tier does not cover
+ * beta. Every field may legitimately be null — the free tier does not cover
  * everything, and a null renders as "—" rather than a guess.
  */
 export async function fetchFundamentals(symbol, fmpKey) {
@@ -166,51 +239,72 @@ export async function fetchFundamentals(symbol, fmpKey) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
-  const k = encodeURIComponent(fmpKey);
   const sym = encodeURIComponent(symbol);
 
-  const [profileRes, metricsRes, ratiosRes] = await Promise.allSettled([
-    fetchJson(`https://financialmodelingprep.com/api/v3/profile/${sym}?apikey=${k}`, `FMP profile ${symbol}`),
-    fetchJson(`https://financialmodelingprep.com/api/v3/key-metrics-ttm/${sym}?apikey=${k}`, `FMP metrics ${symbol}`),
-    fetchJson(`https://financialmodelingprep.com/api/v3/ratios-ttm/${sym}?apikey=${k}`, `FMP ratios ${symbol}`)
+  const [profileRes, metricsRes, ratiosRes, quoteRes] = await Promise.allSettled([
+    fmpFetch([
+      (k) => `${FMP}/stable/profile?symbol=${sym}&apikey=${k}`,
+      (k) => `${FMP}/api/v3/profile/${sym}?apikey=${k}`
+    ], fmpKey, `FMP profile ${symbol}`),
+    fmpFetch([
+      (k) => `${FMP}/stable/key-metrics-ttm?symbol=${sym}&apikey=${k}`,
+      (k) => `${FMP}/api/v3/key-metrics-ttm/${sym}?apikey=${k}`
+    ], fmpKey, `FMP metrics ${symbol}`),
+    fmpFetch([
+      (k) => `${FMP}/stable/ratios-ttm?symbol=${sym}&apikey=${k}`,
+      (k) => `${FMP}/api/v3/ratios-ttm/${sym}?apikey=${k}`
+    ], fmpKey, `FMP ratios ${symbol}`),
+    // The quote carries market cap and P/E on plans where the profile does not.
+    fmpFetch([
+      (k) => `${FMP}/stable/quote?symbol=${sym}&apikey=${k}`,
+      (k) => `${FMP}/api/v3/quote/${sym}?apikey=${k}`
+    ], fmpKey, `FMP quote ${symbol}`)
   ]);
 
-  const profile = profileRes.status === 'fulfilled' ? profileRes.value?.[0] ?? null : null;
-  const metrics = metricsRes.status === 'fulfilled' ? metricsRes.value?.[0] ?? null : null;
-  const ratios = ratiosRes.status === 'fulfilled' ? ratiosRes.value?.[0] ?? null : null;
+  const profile = profileRes.status === 'fulfilled' ? firstRow(profileRes.value) : null;
+  const metrics = metricsRes.status === 'fulfilled' ? firstRow(metricsRes.value) : null;
+  const ratios = ratiosRes.status === 'fulfilled' ? firstRow(ratiosRes.value) : null;
+  const quote = quoteRes.status === 'fulfilled' ? firstRow(quoteRes.value) : null;
 
   // Nothing came back at all: report the first real error instead of an empty shell.
-  if (!profile && !metrics && !ratios) {
-    const firstError = [profileRes, metricsRes, ratiosRes].find((r) => r.status === 'rejected');
-    throw firstError ? firstError.reason : new Error(`FMP ${symbol}: no data returned`);
+  if (!profile && !metrics && !ratios && !quote) {
+    const failed = [profileRes, metricsRes, ratiosRes, quoteRes].find((r) => r.status === 'rejected');
+    throw failed ? failed.reason : new Error(`FMP ${symbol}: no data returned`);
   }
 
-  const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
+  const all = [profile, quote, ratios, metrics];
 
   const fundamentals = {
     symbol: symbol.toUpperCase(),
-    name: profile?.companyName ?? null,
-    sector: profile?.sector ?? null,
-    industry: profile?.industry ?? null,
-    price: num(profile?.price),
-    marketCap: num(profile?.mktCap),
-    beta: num(profile?.beta),
-    currency: profile?.currency ?? 'USD',
-    peTtm: num(ratios?.peRatioTTM ?? metrics?.peRatioTTM),
-    pbTtm: num(ratios?.priceToBookRatioTTM),
-    psTtm: num(ratios?.priceToSalesRatioTTM),
-    epsTtm: num(metrics?.netIncomePerShareTTM),
-    dividendYield: num(ratios?.dividendYielTTM ?? ratios?.dividendYieldTTM ?? metrics?.dividendYieldTTM),
-    payoutRatio: num(ratios?.payoutRatioTTM),
-    grossMargin: num(ratios?.grossProfitMarginTTM),
-    netMargin: num(ratios?.netProfitMarginTTM),
-    roe: num(ratios?.returnOnEquityTTM),
-    debtToEquity: num(ratios?.debtEquityRatioTTM),
-    currentRatio: num(ratios?.currentRatioTTM),
-    fcfPerShare: num(metrics?.freeCashFlowPerShareTTM),
-    revenuePerShare: num(metrics?.revenuePerShareTTM),
-    description: profile?.description ?? null
+    name: pickStr([profile, quote], ['companyName', 'name']),
+    sector: pickStr([profile], ['sector']),
+    industry: pickStr([profile], ['industry']),
+    price: pickNum([profile, quote], ['price']),
+    marketCap: pickNum([profile, quote], ['marketCap', 'mktCap', 'marketCapitalization']),
+    beta: pickNum([profile], ['beta']),
+    currency: pickStr([profile], ['currency']) ?? 'USD',
+    peTtm: pickNum(all, ['priceToEarningsRatioTTM', 'peRatioTTM', 'pe', 'peRatio', 'priceEarningsRatioTTM']),
+    pbTtm: pickNum(all, ['priceToBookRatioTTM', 'pbRatioTTM', 'priceToBookRatio']),
+    psTtm: pickNum(all, ['priceToSalesRatioTTM', 'priceToSalesRatio']),
+    epsTtm: pickNum(all, ['netIncomePerShareTTM', 'epsTTM', 'eps', 'earningsPerShareTTM']),
+    dividendYield: pickNum(all, ['dividendYieldTTM', 'dividendYielTTM', 'dividendYieldPercentageTTM', 'dividendYield']),
+    payoutRatio: pickNum(all, ['payoutRatioTTM', 'dividendPayoutRatioTTM']),
+    grossMargin: pickNum(all, ['grossProfitMarginTTM']),
+    netMargin: pickNum(all, ['netProfitMarginTTM', 'netIncomeMarginTTM']),
+    roe: pickNum(all, ['returnOnEquityTTM']),
+    debtToEquity: pickNum(all, ['debtToEquityRatioTTM', 'debtEquityRatioTTM']),
+    currentRatio: pickNum(all, ['currentRatioTTM']),
+    fcfPerShare: pickNum(all, ['freeCashFlowPerShareTTM']),
+    revenuePerShare: pickNum(all, ['revenuePerShareTTM']),
+    description: pickStr([profile], ['description'])
   };
+
+  // A yield quoted as a percentage (2.4) rather than a fraction (0.024) would
+  // otherwise read as 240%. Percentages are the giveaway: no real dividend
+  // yield is above 100% as a fraction.
+  if (fundamentals.dividendYield !== null && fundamentals.dividendYield > 1) {
+    fundamentals.dividendYield /= 100;
+  }
 
   cacheSet(key, fundamentals);
   return fundamentals;
@@ -223,20 +317,26 @@ export async function fetchPriceTarget(symbol, fmpKey) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
+  const sym = encodeURIComponent(symbol);
   try {
-    const data = await fetchJson(
-      `https://financialmodelingprep.com/api/v4/price-target-consensus?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(fmpKey)}`,
-      `FMP target ${symbol}`
-    );
-    const row = Array.isArray(data) ? data[0] : data;
-    const pick = (v) => (Number.isFinite(Number(v)) && v ? Number(v) : null);
+    const data = await fmpFetch([
+      (k) => `${FMP}/stable/price-target-consensus?symbol=${sym}&apikey=${k}`,
+      (k) => `${FMP}/api/v4/price-target-consensus?symbol=${sym}&apikey=${k}`
+    ], fmpKey, `FMP target ${symbol}`);
+
+    const row = firstRow(data);
     const result = row
-      ? { consensus: pick(row.targetConsensus), high: pick(row.targetHigh), low: pick(row.targetLow), median: pick(row.targetMedian) }
+      ? {
+          consensus: pickNum([row], ['targetConsensus', 'consensus']),
+          high: pickNum([row], ['targetHigh', 'high']),
+          low: pickNum([row], ['targetLow', 'low']),
+          median: pickNum([row], ['targetMedian', 'median'])
+        }
       : null;
     cacheSet(key, result);
     return result;
   } catch {
-    // Consensus targets sit behind a paid tier on some accounts. That is a
+    // Consensus targets sit behind a paid tier on most accounts. That is a
     // missing input, not a broken app: the valuation anchor is skipped and the
     // entry ceiling is built from the anchors that ARE available.
     cacheSet(key, null);
@@ -251,24 +351,36 @@ export async function fetchSectorPe(fmpKey) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const data = await fetchJson(
-      `https://financialmodelingprep.com/api/v4/sector_price_earning_ratio?date=${today}&exchange=NYSE&apikey=${encodeURIComponent(fmpKey)}`,
-      'FMP sector P/E'
-    );
-    const map = new Map();
-    for (const row of Array.isArray(data) ? data : []) {
-      const pe = Number(row.pe);
-      if (row.sector && Number.isFinite(pe)) map.set(row.sector, pe);
+  // Weekends and holidays have no snapshot; step back until one answers.
+  const dates = [0, 1, 2, 3, 4].map((back) =>
+    new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10)
+  );
+
+  for (const date of dates) {
+    try {
+      const data = await fmpFetch([
+        (k) => `${FMP}/stable/sector-pe-snapshot?date=${date}&exchange=NASDAQ&apikey=${k}`,
+        (k) => `${FMP}/stable/sector-pe-snapshot?date=${date}&apikey=${k}`,
+        (k) => `${FMP}/api/v4/sector_price_earning_ratio?date=${date}&exchange=NYSE&apikey=${k}`
+      ], fmpKey, 'FMP sector P/E');
+
+      const map = new Map();
+      for (const row of Array.isArray(data) ? data : []) {
+        const pe = pickNum([row], ['pe', 'peRatio', 'priceEarningsRatio']);
+        const sector = pickStr([row], ['sector']);
+        if (sector && pe !== null && pe > 0) map.set(sector, pe);
+      }
+      if (map.size) {
+        cacheSet(key, map);
+        return map;
+      }
+    } catch {
+      // try the previous day
     }
-    const result = map.size ? map : null;
-    cacheSet(key, result);
-    return result;
-  } catch {
-    cacheSet(key, null);
-    return null;
   }
+
+  cacheSet(key, null);
+  return null;
 }
 
 /* ---------------------------------------------------------------- NewsAPI --- */
